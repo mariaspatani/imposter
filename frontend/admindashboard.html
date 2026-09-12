@@ -213,8 +213,79 @@
     </div>
 </div>
 
+<!-- ── Admin Login Modal ── -->
+<div id="login-modal" class="fixed inset-0 bg-black/90 backdrop-blur-sm z-[999] flex items-center justify-center p-4">
+    <div class="bg-cardgray border border-bordergray rounded-2xl max-w-sm w-full p-8 shadow-2xl space-y-5">
+        <h2 class="text-base font-orbitron font-bold text-crimson-500 uppercase tracking-widest text-center">Admin Login</h2>
+        <p class="text-xs font-rajdhani text-gray-400 text-center">Enter the admin secret to access the dashboard.</p>
+        <input id="login-secret" type="password" placeholder="Admin secret..."
+            class="w-full bg-black border border-bordergray rounded-lg px-4 py-3 text-white font-mono text-sm focus:outline-none focus:border-crimson-500"
+            onkeydown="if(event.key==='Enter') doLogin()">
+        <div id="login-error" class="text-xs text-rose-400 font-orbitron hidden"></div>
+        <button onclick="doLogin()" class="w-full text-sm font-orbitron px-4 py-3 rounded-xl bg-crimson-600 text-white hover:bg-crimson-500 transition-all">
+            AUTHENTICATE
+        </button>
+    </div>
+</div>
+
 <script>
-const API = 'http://localhost:3000';
+const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3000'
+    : '';  // same-origin on Vercel (vercel.json rewrites /api/* to backend)
+
+// ── Admin auth token ────────────────────────────────────────────────────────────
+let ADMIN_TOKEN = sessionStorage.getItem('admin_token') || '';
+
+function authHeaders(extra = {}) {
+    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ADMIN_TOKEN, ...extra };
+}
+
+// Wrapper: auto-redirect to login on 401
+async function apiFetch(url, opts = {}) {
+    const res = await fetch(url, opts);
+    if (res.status === 401) {
+        // Session expired — clear token and show login modal
+        ADMIN_TOKEN = '';
+        sessionStorage.removeItem('admin_token');
+        document.getElementById('login-modal').style.display = 'flex';
+        throw new Error('Session expired. Please log in again.');
+    }
+    return res;
+}
+
+async function doLogin() {
+    const secret = document.getElementById('login-secret').value.trim();
+    const errEl  = document.getElementById('login-error');
+    errEl.classList.add('hidden');
+    try {
+        const r = await fetch(API + '/api/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ secret })
+        });
+        const d = await r.json();
+        if (r.ok && d.success) {
+            ADMIN_TOKEN = d.token;
+            sessionStorage.setItem('admin_token', ADMIN_TOKEN);
+            document.getElementById('login-modal').style.display = 'none';
+            init();
+        } else {
+            errEl.textContent = d.message || 'Invalid secret.';
+            errEl.classList.remove('hidden');
+        }
+    } catch (ex) {
+        errEl.textContent = 'Cannot reach server.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+// Show login modal if no token stored; otherwise init immediately
+if (!ADMIN_TOKEN) {
+    document.getElementById('login-modal').style.display = 'flex';
+} else {
+    document.getElementById('login-modal').style.display = 'none';
+}
+
 const MANUAL_EVENTS = ['Code Imposter','Sherlock Holmes','Drawing'];
 const TIMER_EVENTS  = [
     { name:'Main Event',      secs:2700, label:'Main Event (45 min)' },
@@ -271,14 +342,16 @@ function toggleAcc(id){
 // ── Fetch ──────────────────────────────────────────────────────────────────────
 async function fetchAll(){
     try {
+        const ah = { headers: authHeaders() };
+        const safeJson = r => r.json().catch(() => ({ success: false }));
         const [r1,r2,r3,r4,r5,r6,r7] = await Promise.all([
-            fetch(API+'/api/admin/participants').then(r=>r.json()).catch(()=>({success:false})),
-            fetch(API+'/api/admin/team-scores').then(r=>r.json()).catch(()=>({success:false})),
-            fetch(API+'/api/admin/podium').then(r=>r.json()).catch(()=>({success:false})),
-            fetch(API+'/api/admin/manual-scores').then(r=>r.json()).catch(()=>({success:false})),
-            fetch(API+'/api/admin/event-progress').then(r=>r.json()).catch(()=>({success:false})),
-            fetch(API+'/api/event-timers').then(r=>r.json()).catch(()=>({success:false})),
-            fetch(API+'/api/admin/fizzbuzz/submissions-v2').then(r=>r.json()).catch(()=>({success:false}))
+            apiFetch(API+'/api/admin/participants',ah).then(safeJson).catch(()=>({success:false})),
+            apiFetch(API+'/api/admin/team-scores',ah).then(safeJson).catch(()=>({success:false})),
+            apiFetch(API+'/api/admin/podium',ah).then(safeJson).catch(()=>({success:false})),
+            apiFetch(API+'/api/admin/manual-scores',ah).then(safeJson).catch(()=>({success:false})),
+            apiFetch(API+'/api/admin/event-progress',ah).then(safeJson).catch(()=>({success:false})),
+            apiFetch(API+'/api/event-timers',ah).then(safeJson).catch(()=>({success:false})),
+            apiFetch(API+'/api/admin/fizzbuzz/submissions-v2',ah).then(safeJson).catch(()=>({success:false}))
         ]);
         allParticipants = r1.success ? (r1.participants||[]) : [];
         teamScores      = r2.success ? (r2.scores||[])       : [];
@@ -287,11 +360,15 @@ async function fetchAll(){
         allTimers       = Array.isArray(r6) ? r6 : (r6.timers || r6.data || []);
         fizzSubmissions = r7.success ? (r7.submissions||[])   : [];
 
+        // manual_event_scores_v2 returns flat rows: { original_team, code_imposter, sherlock, drawing }
         manualScores={};
         MANUAL_EVENTS.forEach(ev=>{ manualScores[ev]={}; });
         (r4.success ? (r4.scores||[]) : []).forEach(s=>{
-            if(!manualScores[s.event_name]) manualScores[s.event_name]={};
-            manualScores[s.event_name][s.original_team]=s.marks;
+            if(s.original_team){
+                if(s.code_imposter!=null) manualScores['Code Imposter'][s.original_team]  = s.code_imposter;
+                if(s.sherlock!=null)      manualScores['Sherlock Holmes'][s.original_team] = s.sherlock;
+                if(s.drawing!=null)       manualScores['Drawing'][s.original_team]         = s.drawing;
+            }
         });
 
         const evaluated = allParticipants.filter(a=>a.submission_status==='Evaluated').length;
@@ -302,7 +379,7 @@ async function fetchAll(){
 
 async function loadTimers(){
     try {
-        const r = await fetch(API+'/api/event-timers');
+        const r = await apiFetch(API+'/api/event-timers', { headers: authHeaders() });
         const d = await r.json();
         // Normalise: API returns { success, timers:[...] } or a raw array
         const timers = Array.isArray(d) ? d : (d.timers || d.data || []);
@@ -495,7 +572,7 @@ function renderParticipants(){
 async function unlockSubmission(pid,btn){
     btn.disabled=true; btn.innerText='Unlocking...';
     try{
-        const r=await fetch(API+'/api/admin/unlock-submission',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({participant_id:pid})});
+        const r=await fetch(API+'/api/admin/unlock-submission',{method:'POST',headers:authHeaders(),body:JSON.stringify({participant_id:pid})});
         const d=await r.json();
         if(r.ok&&d.success){ await fetchAll(); renderParticipants(); }
         else { btn.innerText='❌ Failed'; btn.disabled=false; }
@@ -506,7 +583,7 @@ async function unlockSubmission(pid,btn){
 async function triggerEval(pid,name,btn){
     btn.disabled=true; btn.innerText='Evaluating...'; btn.className=btn.className+' opacity-50';
     try{
-        const r=await fetch(API+'/api/evaluate-submission/'+pid,{method:'POST'});
+        const r=await fetch(API+'/api/evaluate-submission/'+pid,{method:'POST',headers:authHeaders()});
         const d=await r.json();
         if(r.ok&&d.success){
             btn.innerText='✅ '+d.score+'/100';
@@ -557,7 +634,7 @@ async function saveManualScore(event_name, original_team, btn){
     if(isNaN(val)||val<0||val>100){ alert('Enter a valid score (0–100)'); return; }
     btn.disabled=true; btn.innerText='Saving...';
     try{
-        const r=await fetch(API+'/api/admin/manual-score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event_name,original_team,marks:val})});
+        const r=await fetch(API+'/api/admin/manual-score',{method:'POST',headers:authHeaders(),body:JSON.stringify({event_name,original_team,marks:val})});
         const d=await r.json();
         if(r.ok&&d.success){
             await fetchAll(); renderManual(); renderPodium(); renderOverview();
@@ -720,7 +797,7 @@ async function timerAction(eventKey, action, btn){
         // New schema: /api/event/start|pause|resume|reset with body {eventKey}
         const r = await fetch(`${API}/api/event/${action}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ eventKey })
         });
         const d = await r.json();
@@ -797,7 +874,7 @@ async function scoreFizzGroup(shuffled_group, is_correct, btn){
     btn.disabled = true; btn.textContent = '...';
     try {
         const r = await fetch(API+'/api/admin/fizzbuzz/score-v2', {
-            method:'POST', headers:{'Content-Type':'application/json'},
+            method:'POST', headers:authHeaders(),
             body: JSON.stringify({ shuffled_group, is_correct })
         });
         const d = await r.json();
@@ -814,7 +891,7 @@ async function toggleFizzBuzz(){
     btn.disabled = true; btn.textContent = '...';
     try {
         const r = await fetch(API+'/api/admin/fizzbuzz/toggle', {
-            method:'POST', headers:{'Content-Type':'application/json'},
+            method:'POST', headers:authHeaders(),
             body: JSON.stringify({ action: isOn ? 'off' : 'on' })
         });
         const d = await r.json();
@@ -901,7 +978,8 @@ function showFB(name,data){
 function closeFB(){ document.getElementById('fb-modal').classList.add('hidden'); }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-(async function init(){
+// Named function so doLogin() can call it after authentication succeeds
+async function init(){
     await fetchAll();
     await refreshFizzToggle();
     renderOverview();
@@ -909,7 +987,10 @@ function closeFB(){ document.getElementById('fb-modal').classList.add('hidden');
     setInterval(async()=>{ await fetchAll(); await refreshFizzToggle(); renderCurrentTab(); }, 30000);
     // Start 1s timer refresh if any timer is currently running
     await loadTimers();
-})();
+}
+
+// Auto-start if token already exists in session
+if (ADMIN_TOKEN) init();
 </script>
 </body>
 </html>

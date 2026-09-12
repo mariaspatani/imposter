@@ -195,6 +195,10 @@
     <button class="emergency-btn" onclick="triggerEmergency()">EMERGENCY</button>
 
     <script>
+        var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+            ? 'http://localhost:3000'
+            : '';
+
         // Space canvas background
         var canvas = document.getElementById('space-bg');
         var ctx = canvas.getContext('2d');
@@ -290,7 +294,7 @@
             submitBtn.textContent = 'VERIFYING...';
 
             try {
-                var response = await fetch('http://localhost:3000/api/authenticate', {
+                var response = await fetch(API_BASE + '/api/authenticate', {
                     method:  'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body:    JSON.stringify({ name: name, team_name: team_name })
@@ -345,7 +349,7 @@
 
             } catch (err) {
                 resBox.className     = 'response-box response-error';
-                resBox.textContent   = 'Unable to reach the server. Make sure the backend is running on localhost:3000.';
+                resBox.textContent   = 'Unable to reach the server.';
                 resBox.style.display = 'block';
             } finally {
                 submitBtn.disabled    = false;

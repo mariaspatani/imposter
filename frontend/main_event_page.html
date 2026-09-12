@@ -150,6 +150,10 @@
     </div>
 
     <script>
+        var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+            ? 'http://localhost:3000'
+            : '';
+
         var PARTICIPANT_ID = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
         if (!PARTICIPANT_ID) {
             var _s = sessionStorage.getItem('imposterParticipant');
@@ -184,10 +188,16 @@
                 '<div class="work-block">'+
                   '<div class="work-block-label">Your Role</div>'+
                   '<div class="work-role-title">'+esc(a.role_name)+'</div>'+
+                  '<div class="work-block-label" style="margin-top:10px;">Cover Job (What the team thinks you\'re doing)</div>'+
                   '<div class="work-text">'+esc(a.work_description)+'</div>'+
                 '</div>';
-            if (a.is_imposter) {
-                html += '<div class="work-block secret"><div class="work-block-label">&#9888; Secret Objective &mdash; Do Not Share</div><div class="work-role-title">The above is your SECRET task. Do not reveal it to anyone.</div></div>';
+            if (a.is_imposter && a.secret_objective) {
+                html += '<div class="work-block secret">'+
+                  '<div class="work-block-label">&#9888; SECRET SABOTAGE OBJECTIVE &mdash; DO NOT SHARE WITH ANYONE</div>'+
+                  '<div class="work-text">'+esc(a.secret_objective)+'</div>'+
+                '</div>';
+            } else if (a.is_imposter) {
+                html += '<div class="work-block secret"><div class="work-block-label">&#9888; Secret Objective</div><div class="work-text">Loading secret objective... If this persists, contact the coordinator.</div></div>';
             }
             html += '</div>';
             document.getElementById('assignment-section').innerHTML = html;
@@ -244,7 +254,7 @@
                 pollAttempts++;
                 if (pollAttempts > 30) { clearInterval(pollTimer); return; } // stop after ~2.5 min
                 try {
-                    var res = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
+                    var res = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                     var data = await res.json();
                     if (data.success && data.assignment && (data.assignment.submission_status === 'Evaluated' || data.assignment.evaluation_status === 'Evaluated')) {
                         clearInterval(pollTimer);
@@ -256,7 +266,7 @@
 
         async function loadAssignment() {
             try {
-                var res  = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
+                var res  = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                 var data = await res.json();
                 if (!res.ok || !data.success) {
                     document.getElementById('assignment-section').innerHTML = '<div class="state-card error">'+esc(data&&data.message?data.message:'Assignment not found.')+'</div>';
@@ -274,7 +284,7 @@
                     startPolling();
                 }
             } catch(e) {
-                document.getElementById('assignment-section').innerHTML = '<div class="state-card error">Unable to reach the server. Make sure the backend is running on localhost:3000.</div>';
+                document.getElementById('assignment-section').innerHTML = '<div class="state-card error">Unable to reach the server.</div>';
             }
         }
 
@@ -300,7 +310,7 @@
             stopSW();
 
             try {
-                var res  = await fetch('http://localhost:3000/api/submit-github', {
+                var res  = await fetch(API_BASE + '/api/submit-github', {
                     method: 'POST', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ participant_id: PARTICIPANT_ID, github_repo: url })
                 });
@@ -332,7 +342,7 @@
 
             } catch(err) {
                 alertBox.className = 'alert-box alert-error';
-                alertBox.innerText = 'Unable to reach the server. Make sure the backend is running on localhost:3000.';
+                alertBox.innerText = 'Unable to reach the server.';
                 alertBox.style.display = 'block';
                 btn.disabled = false;
                 btn.textContent = 'Submit Link for Evaluation';
@@ -396,7 +406,7 @@
 
         async function checkFizzBuzzGate() {
             try {
-                var r    = await fetch('http://localhost:3000/api/fizzbuzz/toggle');
+                var r    = await fetch(API_BASE + '/api/fizzbuzz/toggle');
                 var data = await r.json();
                 if (!data.success) return;
                 updateFizzBuzzGateUI(data.fizzbuzz_open, data.status);
@@ -418,7 +428,7 @@
         // On page load: if already submitted, show gate immediately and start polling
         (async function initGate(){
             try {
-                var res  = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
+                var res  = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                 var data = await res.json();
                 if (data.success && data.assignment &&
                     (data.assignment.submission_status === 'Submitted' ||
