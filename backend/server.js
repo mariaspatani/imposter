@@ -7,10 +7,15 @@ const path      = require('path');
 require('dotenv').config();
 
 const { createClient }    = require('@supabase/supabase-js');
-const { evaluateSubmission, validateRepository } = require('./aiScorer');
+const { validateRepository } = require('./aiScorer');
 const { requireAdmin }    = require('./middleware/auth');
 const { authLimiter, submitLimiter, evalLimiter, registerLimiter, adminLimiter } = require('./middleware/rateLimit');
 const { isValidGitHubUrl, sanitizeName, isUUID, clampScore, escHtml } = require('./middleware/sanitize');
+const timerLib = require('./lib/timer');
+const fizzbuzzLib = require('./lib/fizzbuzz');
+const scoringLib = require('./lib/scoring');
+const { processEvaluation, loadCriteria, publicEvaluationView, evaluationState } = require('./lib/evaluation/pipeline');
+const { DEFAULT_MAIN_EVENT_CRITERIA, maxTotal } = require('./lib/evaluation/criteria');
 
 // ── Startup validation ────────────────────────────────────────────────────────
 
@@ -34,7 +39,8 @@ const REQUIRED_TABLES = [
   'teams', 'participants', 'main_event_tasks', 'main_event_assignments',
   'event_timers', 'shuffle_lock', 'fizzbuzz_submissions_v2',
   'code_imposter_submissions', 'manual_event_scores_v2',
-  'admin_sessions', 'audit_log'
+  'admin_sessions', 'audit_log',
+  'evaluation_criteria', 'score_events', 'evaluations', 'game_config', 'event_state'
 ];
 
 async function checkRequiredTables() {
@@ -129,36 +135,26 @@ function auditLog(action, target, details, performedBy = 'system') {
     .then(() => {}).catch(() => {});
 }
 
-/** Compute server-side remaining seconds from a timer row. */
-function computeRemaining(t) {
-  if (!t) return 0;
-  const fullSecs = (t.duration_minutes || 15) * 60;
+const computeRemaining = timerLib.computeRemaining;
+const normaliseTimer   = timerLib.normaliseTimer;
 
-  if (t.status === 'finished') return 0;
-
-  if (t.status === 'running' && t.started_at) {
-    const runningFor = Math.floor((Date.now() - new Date(t.started_at).getTime()) / 1000);
-    // If remaining_seconds is 0 or null (e.g. fresh start before first tick), fall back to full duration.
-    const stored     = (t.remaining_seconds != null && t.remaining_seconds > 0) ? t.remaining_seconds : fullSecs;
-    return Math.max(0, stored - runningFor);
+async function loadGameConfig(gameId) {
+  try {
+    const { data } = await supabase.from('game_config').select('*').eq('game_id', gameId).maybeSingle();
+    return fizzbuzzLib.mergeGameConfig(data || { game_id: gameId });
+  } catch (_) {
+    return fizzbuzzLib.mergeGameConfig({ game_id: gameId });
   }
-
-  // idle / paused / waiting / stopped / any other state — return the snapshotted value
-  if (t.remaining_seconds != null && t.remaining_seconds > 0) return t.remaining_seconds;
-  return fullSecs;
 }
 
-function normaliseTimer(t) {
-  const remaining = computeRemaining(t);
-  return {
-    event_key:         t.event_key,
-    event_name:        t.event_name || t.event_key,
-    duration_minutes:  t.duration_minutes,
-    remaining_seconds: remaining,
-    status:            t.status || 'idle',
-    started_at:        t.started_at,
-    paused_at:         t.paused_at
-  };
+async function setScoringLocked(gameId, locked) {
+  try {
+    await supabase.from('game_config').upsert({
+      game_id: gameId,
+      scoring_locked: !!locked,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'game_id' });
+  } catch (_) {}
 }
 
 const EVENT_KEY_MAP = {
@@ -405,31 +401,16 @@ app.post('/api/submit-github', submitLimiter, async (req, res) => {
 /**
  * Run AI evaluation and persist results.
  * Safe to call from background — all errors are caught and saved.
+ * Uses the new processEvaluation pipeline for proper state machine.
  */
 async function runEvaluation(participantId, assignmentData) {
-  // Mark as evaluating
-  await supabase
-    .from('main_event_assignments')
-    .update({ evaluation_status: 'Evaluating' })
-    .eq('participant_id', participantId);
-
   try {
-    const result = await evaluateSubmission(assignmentData);
+    const result = await processEvaluation(supabase, participantId, {
+      retry: false,
+      force: false
+    });
 
-    await supabase.from('main_event_assignments').update({
-      ai_score:           result.total_score,
-      ui_score:           result.ui_score,
-      task_match_score:   result.task_completion_score,
-      logic_score:        result.logic_score,
-      creativity_score:   result.creativity_score,
-      code_quality_score: result.responsiveness_score,
-      ai_feedback:        result.feedback,
-      evaluation_status:  'Evaluated',
-      submission_status:  'Evaluated'
-    }).eq('participant_id', participantId);
-
-    console.log('[eval] Completed for', participantId, '— score:', result.total_score);
-
+    console.log('[eval] Completed for', participantId, '— success:', result.success, 'state:', result.evaluation_state);
   } catch (evalErr) {
     console.error('[eval] Failed for', participantId, ':', evalErr.message);
 
@@ -589,14 +570,21 @@ app.post('/api/fizzbuzz/submit-v2', submitLimiter, async (req, res) => {
       return res.status(500).json({ success: false, message: 'Submission failed. Please try again.' });
     }
 
-    // Lock all 4 members of the group
+    // Lock all 4 members of the group - session team submission
     await supabase.from('main_event_assignments')
       .update({ fizzbuzz_locked: true, fizzbuzz_completed: true })
       .eq('shuffled_group', assignment.shuffled_group);
 
+    auditLog('fizzbuzz_submit', assignment.shuffled_group, {
+      submitted_by: assignment.participant_name,
+      participant_id: participant_id,
+      language
+    });
+
     return res.json({
       success:        true,
       shuffled_group: assignment.shuffled_group,
+      session_team_id: assignment.shuffled_group,
       submitted_by:   assignment.participant_name,
       language
     });
@@ -1085,8 +1073,10 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
         rows.push({
           participant_id:    m.id,
           participant_name:  m.participant_name,
+          original_team_id:  m.team_id,
           original_team:     (teamMap[m.team_id]||{}).team_name || 'Unknown',
           shuffled_group:    group.groupName,
+          session_team_id:   group.groupName,
           task_number:       task.task_number,
           task_title:        task.task_title,
           task_description:  task.task_description,
@@ -1105,8 +1095,10 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       rows.push({
         participant_id:    imp.id,
         participant_name:  imp.participant_name,
+        original_team_id:  imp.team_id,
         original_team:     (teamMap[imp.team_id]||{}).team_name || 'Unknown',
         shuffled_group:    group.groupName,
+        session_team_id:   group.groupName,
         task_number:       task.task_number,
         task_title:        task.task_title,
         task_description:  task.task_description,
@@ -1162,7 +1154,19 @@ app.get('/api/admin/overview', requireAdmin, async (req, res) => {
 
 app.get('/api/admin/participants', requireAdmin, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('main_event_assignments').select('*').order('shuffled_group');
+    // Explicit field selection for security - no secret_objective here (it's not in this table anyway)
+    const { data, error } = await supabase
+      .from('main_event_assignments')
+      .select(
+        'participant_id, participant_name, original_team, shuffled_group, ' +
+        'task_number, task_title, task_description, ' +
+        'person_slot, role_name, work_description, is_imposter, ' +
+        'github_repo, github_owner, github_repo_name, submission_status, evaluation_status, submitted_at, ' +
+        'ai_score, ui_score, task_match_score, logic_score, creativity_score, code_quality_score, ai_feedback, ' +
+        'main_event_score, fizzbuzz_score, fizzbuzz_team_score, fizzbuzz_speed_bonus, imposter_bonus, total_individual_score, ' +
+        'runtime_evidence'
+      )
+      .order('shuffled_group');
     if (error) return res.status(500).json({ success: false, message: error.message });
     return res.json({ success: true, participants: data || [] });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
@@ -1172,27 +1176,57 @@ app.get('/api/admin/participants', requireAdmin, async (req, res) => {
 
 app.get('/api/admin/team-scores', requireAdmin, async (req, res) => {
   try {
-    const [assignRes, manualRes] = await Promise.all([
-      supabase.from('main_event_assignments').select('original_team, main_event_score, fizzbuzz_score, ai_score'),
-      supabase.from('manual_event_scores_v2').select('*')
-    ]);
+    // Use score_events for authoritative leaderboard
+    const { data: scoreEvents, error: scoreErr } = await supabase
+      .from('score_events')
+      .select('*');
 
-    const teamMap = {};
-    (assignRes.data || []).forEach(r => {
-      const t = r.original_team || 'Unknown';
-      if (!teamMap[t]) teamMap[t] = { team: t, main_event_total: 0, fizzbuzz_total: 0, manual_total: 0, grand_total: 0 };
-      teamMap[t].main_event_total += Number(r.main_event_score || 0);
-      teamMap[t].fizzbuzz_total   += Number(r.fizzbuzz_score   || 0);
-    });
-    (manualRes.data || []).forEach(r => {
-      const t = r.original_team;
-      if (!teamMap[t]) teamMap[t] = { team: t, main_event_total: 0, fizzbuzz_total: 0, manual_total: 0, grand_total: 0 };
-      teamMap[t].manual_total += Number(r.code_imposter || 0) + Number(r.sherlock || 0) + Number(r.drawing || 0);
-    });
+    if (scoreErr) {
+      console.error('[team-scores] Falling back to assignments due to score_events error:', scoreErr.message);
+      // Fallback to assignment-based calculation
+      const [assignRes, manualRes] = await Promise.all([
+        supabase.from('main_event_assignments').select('original_team, main_event_score, fizzbuzz_score, ai_score, original_team_id'),
+        supabase.from('manual_event_scores_v2').select('*')
+      ]);
 
-    const scores = Object.values(teamMap).map(t => { t.grand_total = t.main_event_total + t.fizzbuzz_total + t.manual_total; return t; }).sort((a, b) => b.grand_total - a.grand_total);
-    return res.json({ success: true, scores });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+      const teamMap = {};
+      (assignRes.data || []).forEach(r => {
+        const t = r.original_team || 'Unknown';
+        if (!teamMap[t]) teamMap[t] = { team: t, originalTeamId: r.original_team_id, main_event_total: 0, fizzbuzz_total: 0, manual_total: 0, grand_total: 0, contributions: { main_event: 0, fizzbuzz: 0, code_imposter: 0, sherlock: 0, drawing: 0 } };
+        teamMap[t].main_event_total += Number(r.main_event_score || 0);
+        teamMap[t].fizzbuzz_total   += Number(r.fizzbuzz_score   || 0);
+        teamMap[t].contributions.main_event += Number(r.main_event_score || 0);
+        teamMap[t].contributions.fizzbuzz += Number(r.fizzbuzz_score || 0);
+      });
+      (manualRes.data || []).forEach(r => {
+        const t = r.original_team;
+        if (!teamMap[t]) teamMap[t] = { team: t, originalTeamId: null, main_event_total: 0, fizzbuzz_total: 0, manual_total: 0, grand_total: 0, contributions: { main_event: 0, fizzbuzz: 0, code_imposter: 0, sherlock: 0, drawing: 0 } };
+        teamMap[t].manual_total += Number(r.code_imposter || 0) + Number(r.sherlock || 0) + Number(r.drawing || 0);
+        teamMap[t].contributions.code_imposter += Number(r.code_imposter || 0);
+        teamMap[t].contributions.sherlock += Number(r.sherlock || 0);
+        teamMap[t].contributions.drawing += Number(r.drawing || 0);
+      });
+
+      const scores = Object.values(teamMap).map(t => { t.grand_total = t.main_event_total + t.fizzbuzz_total + t.manual_total; return t; }).sort((a, b) => b.grand_total - a.grand_total);
+      return res.json({ success: true, scores, source: 'fallback' });
+    }
+
+    // Aggregate from score_events by original team
+    const aggregated = scoringLib.aggregateOriginalTeams(scoreEvents);
+    const scores = aggregated.map(t => ({
+      team: t.team,
+      originalTeamId: t.originalTeamId,
+      main_event_total: t.byGame['main_event'] || 0,
+      fizzbuzz_total: t.byGame['fizzbuzz'] || 0,
+      manual_total: (t.byGame['code_imposter'] || 0) + (t.byGame['sherlock'] || 0) + (t.byGame['drawing'] || 0),
+      grand_total: t.total,
+      contributions: t.byGame
+    })).sort((a, b) => b.grand_total - a.grand_total);
+
+    return res.json({ success: true, scores, source: 'score_events' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // ── GET /api/admin/podium ─────────────────────────────────────────────────────
@@ -1392,33 +1426,93 @@ async function applyFizzBuzzScore(req, res) {
 
     await supabase.from('fizzbuzz_submissions_v2').update({ is_correct }).eq('shuffled_group', shuffled_group);
 
+    // Load game config for scoring rules
+    const config = await loadGameConfig('fizzbuzz');
+
     // Speed bonus: first two submissions get 5pts, others 2pts
     const { data: allSubs } = await supabase.from('fizzbuzz_submissions_v2').select('shuffled_group, submitted_at').order('submitted_at');
     const speedMap = {};
-    (allSubs || []).forEach((s, i) => { speedMap[s.shuffled_group] = i < 2 ? 5 : 2; });
+    (allSubs || []).forEach((s, i) => { speedMap[s.shuffled_group] = fizzbuzzLib.speedBonusForIndex(i, config); });
 
-    const teamScore  = is_correct ? 20 : 0;
-    const speedBonus = speedMap[shuffled_group] || 2;
-    const sabotaged  = sub.imposter_sabotaged && !is_correct;
+    const teamScore  = is_correct ? (config.correctTeamScore || 20) : (config.incorrectTeamScore || 0);
+    const speedBonus = speedMap[shuffled_group] || fizzbuzzLib.speedBonusForIndex(99, config);
 
-    await supabase.from('fizzbuzz_submissions_v2').update({ speed_bonus: speedBonus, imposter_bonus: sabotaged ? 10 : 0 }).eq('shuffled_group', shuffled_group);
+    // Evaluate imposter success using configured condition
+    const tokens = fizzbuzzLib.parseFizzBuzzTokens(sub.fizz_output);
+    const comparison = fizzbuzzLib.compareSequence(tokens, config);
+    const imposterEval = fizzbuzzLib.evaluateImposterSuccess(comparison, config);
+    const imposterBonus = imposterEval.success ? (config.imposterBonus || 10) : 0;
 
-    const { data: members } = await supabase.from('main_event_assignments').select('participant_id, is_imposter, main_event_score').eq('shuffled_group', shuffled_group);
+    await supabase.from('fizzbuzz_submissions_v2').update({
+      speed_bonus: speedBonus,
+      imposter_bonus: imposterBonus,
+      is_correct
+    }).eq('shuffled_group', shuffled_group);
 
-    for (const m of (members || [])) {
-      const impBonus  = (sabotaged && m.is_imposter) ? 10 : 0;
-      const fzScore   = sabotaged ? 0 : (teamScore + speedBonus);
-      const mainScore = Number(m.main_event_score || 0);
+    // Get all members with their original team info
+    const { data: members } = await supabase.from('main_event_assignments').select(
+      'participant_id, participant_name, is_imposter, main_event_score, original_team_id, original_team, shuffled_group'
+    ).eq('shuffled_group', shuffled_group);
+
+    // Calculate individual scores for each participant
+    const individualScores = fizzbuzzLib.individualFizzBuzzScores(members, {
+      isCorrect: is_correct,
+      speedBonus: speedBonus,
+      imposter: { success: imposterEval.success, bonus: imposterBonus, config }
+    });
+
+    // Apply individual scores and record score events
+    for (const score of individualScores) {
+      const mainScore = Number(score.baseScore || 0);
+      const finalScore = score.finalScore;
+
       await supabase.from('main_event_assignments').update({
-        fizzbuzz_team_score: sabotaged ? 0 : teamScore, fizzbuzz_speed_bonus: speedBonus,
-        imposter_bonus: impBonus, fizzbuzz_score: fzScore + impBonus,
-        total_individual_score: mainScore + fzScore + impBonus
-      }).eq('participant_id', m.participant_id);
+        fizzbuzz_team_score: teamScore,
+        fizzbuzz_speed_bonus: speedBonus,
+        imposter_bonus: score.imposterBonus,
+        fizzbuzz_score: finalScore,
+        total_individual_score: mainScore + finalScore
+      }).eq('participant_id', score.participantId);
+
+      // Record score event for audit trail
+      try {
+        await scoringLib.recordScoreEvent(supabase, {
+          gameId: 'fizzbuzz',
+          participantId: score.participantId,
+          originalTeamId: score.originalTeamId,
+          originalTeamName: score.originalTeam,
+          sessionTeamId: score.sessionTeamId,
+          points: finalScore,
+          reason: `FizzBuzz individual score (base: ${score.baseScore}, imposter bonus: ${score.imposterBonus})`,
+          type: scoringLib.TYPES.INDIVIDUAL_SCORE,
+          idempotencyKey: `fizzbuzz:${score.participantId}:INDIVIDUAL_SCORE`
+        });
+      } catch (scoreErr) {
+        console.error('[SCORE_CREATED] ledger write failed for FizzBuzz:', scoreErr.message);
+      }
     }
 
-    auditLog('fizzbuzz_score', shuffled_group, { is_correct, team_score: teamScore, speed_bonus: speedBonus });
-    return res.json({ success: true, message: 'Scores applied for ' + shuffled_group });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+    auditLog('fizzbuzz_score', shuffled_group, {
+      is_correct,
+      team_score: teamScore,
+      speed_bonus: speedBonus,
+      imposter_success: imposterEval.success,
+      imposter_bonus: imposterBonus,
+      imposter_reason: imposterEval.reason
+    });
+
+    return res.json({
+      success: true,
+      message: 'Scores applied for ' + shuffled_group,
+      team_score: teamScore,
+      speed_bonus: speedBonus,
+      imposter_bonus: imposterBonus,
+      imposter_success: imposterEval.success,
+      individual_scores: individualScores
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
 }
 
 app.post('/api/admin/fizzbuzz/score',    requireAdmin, applyFizzBuzzScore);
@@ -1465,41 +1559,17 @@ async function timerAction(eventKey, action, extraPayload = {}) {
   const { data: t, error } = await supabase.from('event_timers').select('*').eq('event_key', eventKey).maybeSingle();
   if (error || !t) return { ok: false, message: 'Timer not found: ' + eventKey };
 
-  const fullSecs = (t.duration_minutes || 15) * 60;
-  let update     = {};
+  const result = timerLib.applyTimerAction(t, action, extraPayload);
+  if (!result.ok) return result;
 
-  if (action === 'start') {
-    if (t.status === 'running') return { ok: false, message: 'Timer is already running.' };
-    if (t.status === 'finished') return { ok: false, message: 'Timer has already finished. Use reset first.' };
-    // Fresh start always begins from full duration
-    update = { status: 'running', started_at: new Date().toISOString(), paused_at: null, remaining_seconds: fullSecs };
-  } else if (action === 'pause') {
-    if (t.status !== 'running') return { ok: false, message: 'Timer is not running.' };
-    // Snapshot remaining_seconds at pause time so resume can correctly subtract elapsed from this value.
-    // computeRemaining already accounts for elapsed since started_at — use it directly.
-    const remaining = computeRemaining(t);
-    update = { status: 'paused', paused_at: new Date().toISOString(), started_at: null, remaining_seconds: remaining };
-  } else if (action === 'resume') {
-    if (t.status !== 'paused') return { ok: false, message: 'Timer is not paused.' };
-    // Resume from saved remaining_seconds snapshot — do NOT modify remaining_seconds here.
-    // computeRemaining(t) will correctly return: remaining_seconds - (now - started_at).
-    update = { status: 'running', started_at: new Date().toISOString(), paused_at: null };
-  } else if (action === 'reset') {
-    update = { status: 'idle', started_at: null, paused_at: null, remaining_seconds: fullSecs };
-  } else if (action === 'finish') {
-    update = { status: 'finished', remaining_seconds: 0, started_at: null };
-  } else if (action === 'tick') {
-    const rs = Number(extraPayload.remaining_seconds);
-    if (!Number.isFinite(rs)) return { ok: false, message: 'remaining_seconds required.' };
-    if (t.status !== 'running') return { ok: true, message: 'Timer not running — tick ignored.' };
-    // Also reset started_at to now so elapsed-time arithmetic stays consistent with the ticked value.
-    update = { remaining_seconds: Math.max(0, rs), started_at: new Date().toISOString() };
-  }
-
-  const { error: updErr } = await supabase.from('event_timers').update({ ...update, updated_at: new Date().toISOString() }).eq('event_key', eventKey);
+  const { error: updErr } = await supabase.from('event_timers').update({ ...result.update, updated_at: new Date().toISOString() }).eq('event_key', eventKey);
   if (updErr) return { ok: false, message: updErr.message };
 
-  return { ok: true, status: update.status || t.status, remaining_seconds: update.remaining_seconds };
+  if (result.ignore) {
+    return { ok: true, status: t.status, remaining_seconds: timerLib.computeRemaining(t) };
+  }
+
+  return { ok: true, status: result.update.status || t.status, remaining_seconds: result.update.remaining_seconds };
 }
 
 ['start', 'pause', 'resume', 'reset', 'finish', 'tick'].forEach(action => {

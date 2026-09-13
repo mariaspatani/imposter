@@ -835,7 +835,7 @@
                 totalTeamsEl.textContent = String(teams.length);
                 totalParticipantsEl.textContent = String(totalParticipants);
                 if (teams.length === 0) {
-                    registeredTeamsListEl.innerHTML = '<div class="team-card">No real teams registered yet.</div>';
+                    registeredTeamsListEl.textContent = 'No real teams registered yet.';
                     updateShuffleButtonState([]);
                     return;
                 }
@@ -844,19 +844,19 @@
                     const isComplete = memberCount === 4;
                     return `<div class="team-card ${isComplete ? '' : 'incomplete'}">
                         <div class="team-card-header">
-                            <span class="team-card-name">${team.team_name}</span>
+                            <span class="team-card-name">${esc(team.team_name)}</span>
                             <span class="team-card-meta">
-                                <span class="team-card-code">${team.team_code}</span>
+                                <span class="team-card-code">${esc(team.team_code)}</span>
                                 <span class="team-badge ${isComplete ? 'complete' : 'incomplete'}">${isComplete ? '4/4 Members' : memberCount + '/4 Members'}</span>
                             </span>
                         </div>
-                        <ul class="team-members">${(team.members || []).map(m => `<li>${m}</li>`).join('')}</ul>
+                        <ul class="team-members">${(team.members || []).map(m => `<li>${esc(m)}</li>`).join('')}</ul>
                         ${isComplete ? '' : '<div class="team-warning">Incomplete Team</div>'}
                     </div>`;
                 }).join('');
                 updateShuffleButtonState(teams);
             } catch (error) {
-                registeredTeamsListEl.innerHTML = '<div class="team-card"><strong>Unable to contact the backend.</strong></div>';
+                registeredTeamsListEl.textContent = 'Unable to contact the backend.';
                 updateShuffleButtonState([]);
             }
         }
@@ -918,14 +918,14 @@
                 const rows = sorted.map(p => {
                     const isImp = p.role === 'Imposter' || p.is_imposter === true;
                     return `<tr class="${isImp ? 'imposter-row' : ''}">
-                        <td>${p.participant_name}${isImp ? '<span class="imposter-badge">Imposter</span>' : ''}</td>
-                        <td>${p.original_team}</td>
-                        <td>${p.role}</td>
+                        <td>${esc(p.participant_name)}${isImp ? '<span class="imposter-badge">Imposter</span>' : ''}</td>
+                        <td>${esc(p.original_team)}</td>
+                        <td>${esc(p.role)}</td>
                     </tr>`;
                 }).join('');
                 return `<div class="group-card">
-                    <h3>${group.groupName}</h3>
-                    ${taskTitle ? `<div class="group-task-label">Main Event Task</div><div class="group-task-title">${taskTitle}</div>` : ''}
+                    <h3>${esc(group.groupName)}</h3>
+                    ${taskTitle ? `<div class="group-task-label">Main Event Task</div><div class="group-task-title">${esc(taskTitle)}</div>` : ''}
                     <table class="group-table">
                         <thead><tr><th>Name</th><th>Original Team</th><th>Role</th></tr></thead>
                         <tbody>${rows}</tbody>
@@ -980,8 +980,10 @@
             }
 
             const win = window.open('', '_blank');
-            win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Seating Arrangement — Imposter Project</title>${style}</head><body><h1>Seating Arrangement — Imposter Project / ASTRA 11.0</h1><div class="grid">${cardsHTML}</div></body></html>`);
-            win.document.close();
+            const doc = win.document;
+            doc.open();
+            doc.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Seating Arrangement — Imposter Project</title>${style}</head><body><h1>Seating Arrangement — Imposter Project / ASTRA 11.0</h1><div class="grid">${cardsHTML}</div></body></html>`);
+            doc.close();
             win.focus();
             setTimeout(() => win.print(), 400);
         }
