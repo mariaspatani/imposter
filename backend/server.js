@@ -1165,7 +1165,7 @@ app.get('/api/admin/participants', requireAdmin, async (req, res) => {
         'person_slot, role_name, work_description, is_imposter, ' +
         'github_repo, github_owner, github_repo_name, submission_status, evaluation_status, submitted_at, ' +
         'ai_score, ui_score, task_match_score, logic_score, creativity_score, code_quality_score, ai_feedback, ' +
-        'main_event_score, fizzbuzz_score, fizzbuzz_team_score, fizzbuzz_speed_bonus, imposter_bonus, total_individual_score'
+        'main_event_score, fizzbuzz_score, total_score'
       )
       .order('shuffled_group');
     if (error) return res.status(500).json({ success: false, message: error.message });
@@ -1385,7 +1385,7 @@ app.post('/api/admin/save-fizzbuzz-group-score', requireAdmin, async (req, res) 
       const bonusVal    = (imposter_bonus && m.is_imposter) ? 10 : 0;
       const { error: updErr } = await supabase
         .from('main_event_assignments')
-        .update({ fizzbuzz_score: memberScore, imposter_bonus: bonusVal })
+        .update({ fizzbuzz_score: memberScore })
         .eq('participant_id', m.participant_id);
       if (updErr) { console.error('[fizzbuzz-group-score update]', m.participant_id, updErr.message); }
       else { updated.push({ participant_id: m.participant_id, name: m.participant_name, original_team: m.original_team, score: memberScore }); }
@@ -1401,7 +1401,7 @@ app.get('/api/admin/main-event-scores', requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('main_event_assignments')
-      .select('participant_id, participant_name, original_team, shuffled_group, role_name, github_repo, ai_score, submission_status, is_imposter, fizzbuzz_score, imposter_bonus')
+      .select('participant_id, participant_name, original_team, shuffled_group, role_name, github_repo, ai_score, submission_status, is_imposter, fizzbuzz_score')
       .order('shuffled_group', { ascending: true });
     if (error) return res.status(500).json({ success: false, message: error.message });
     return res.json({ success: true, participants: data || [] });
