@@ -1165,8 +1165,7 @@ app.get('/api/admin/participants', requireAdmin, async (req, res) => {
         'person_slot, role_name, work_description, is_imposter, ' +
         'github_repo, github_owner, github_repo_name, submission_status, evaluation_status, submitted_at, ' +
         'ai_score, ui_score, task_match_score, logic_score, creativity_score, code_quality_score, ai_feedback, ' +
-        'main_event_score, fizzbuzz_score, fizzbuzz_team_score, fizzbuzz_speed_bonus, imposter_bonus, total_individual_score, ' +
-        'runtime_evidence'
+        'main_event_score, fizzbuzz_score, fizzbuzz_team_score, fizzbuzz_speed_bonus, imposter_bonus, total_individual_score'
       )
       .order('shuffled_group');
     if (error) return res.status(500).json({ success: false, message: error.message });
