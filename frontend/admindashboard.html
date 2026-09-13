@@ -1256,17 +1256,55 @@ async function fbRunCode(shuffled_group, gid, btn){
         const d = await r.json();
 
         if(d.success){
-            const hasStderr = (d.stderr||'').trim().length > 0;
-            const exitOk    = d.exit_code === 0 || d.exit_code === null;
-            outPre.textContent = d.output || '(no output)';
+            const stdout         = (d.stdout         || '').trim();
+            const stderr         = (d.stderr         || '').trim();
+            const compile_output = (d.compile_output || '').trim();
+            const message        = (d.message        || '').trim();
+            const statusDesc     = d.status || 'Unknown';
+            const hasErrors      = stderr.length > 0 || compile_output.length > 0 || message.length > 0;
+            const exitOk         = d.exit_code === 0 || d.exit_code === null;
+
+            let displayText = '';
+            if (stdout.length > 0) {
+                displayText = stdout;
+            } else if (!hasErrors) {
+                displayText = '(no output)';
+            }
+
+            if (hasErrors) {
+                const errorParts = [];
+                if (compile_output.length > 0) errorParts.push('── COMPILER OUTPUT ──\n' + compile_output);
+                if (stderr.length > 0)         errorParts.push('── STDERR / RUNTIME ERROR ──\n' + stderr);
+                if (message.length > 0 && message !== compile_output && message !== stderr) {
+                    errorParts.push('── MESSAGE ──\n' + message);
+                }
+                if (errorParts.length > 0) {
+                    displayText = (displayText ? displayText + '\n\n' : '') + errorParts.join('\n\n');
+                }
+            }
+
+            outPre.textContent = displayText;
+            const isError = hasErrors || !exitOk;
             outPre.className   = 'px-4 py-3 text-xs font-mono ' +
-                (hasStderr || !exitOk ? 'text-rose-300' : 'text-emerald-300') +
+                (isError ? 'text-rose-300' : 'text-emerald-300') +
                 ' bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-60 overflow-y-auto';
-            if(outStatus) outStatus.textContent = exitOk ? '✅ Exit 0' : `⚠ Exit ${d.exit_code}`;
+
+            if (outStatus) {
+                if (exitOk && !hasErrors) {
+                    outStatus.textContent = '✅ ' + (statusDesc || 'Success');
+                    outStatus.className = 'text-[10px] font-orbitron text-emerald-400';
+                } else {
+                    outStatus.textContent = '⚠ ' + (statusDesc || 'Error');
+                    outStatus.className = 'text-[10px] font-orbitron text-rose-400';
+                }
+            }
         } else {
             outPre.textContent = '❌ ' + (d.message || 'Execution failed');
             outPre.className   = 'px-4 py-3 text-xs font-mono text-rose-400 bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-60 overflow-y-auto';
-            if(outStatus) outStatus.textContent = '❌ Error';
+            if(outStatus) {
+                outStatus.textContent = '❌ Error';
+                outStatus.className = 'text-[10px] font-orbitron text-rose-400';
+            }
         }
     } catch(ex){
         outPre.textContent = '❌ Network error: ' + ex.message;

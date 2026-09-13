@@ -1560,30 +1560,106 @@ app.post('/api/admin/fizzbuzz/run-code', requireAdmin, async (req, res) => {
 
     const judge0Base = (process.env.JUDGE0_URL || 'https://ce.judge0.com').replace(/\/$/, '');
 
-    let judgeRes;
+    // Safe Base64 → UTF-8 decoder. Judge0 stores fields as base64 when
+    // base64_encoded=true; some submissions contain non-UTF-8 bytes, so we
+    // fall back to Latin-1 ('binary') when strict UTF-8 decoding fails.
+    const decodeJudge64 = (s) => {
+      if (s == null || s === '') return '';
+      if (typeof s !== 'string') return String(s);
+      try {
+        return Buffer.from(s, 'base64').toString('utf-8');
+      } catch (_) {
+        try {
+          return Buffer.from(s, 'base64').toString('binary');
+        } catch (__) {
+          return String(s);
+        }
+      }
+    };
+
+    // Base64-encoder for INPUT fields (required by Judge0 when base64_encoded=true)
+    const encodeJudge64 = (s) => {
+      if (s == null) return '';
+      return Buffer.from(String(s), 'utf-8').toString('base64');
+    };
+
+    const payload = {
+      source_code: encodeJudge64(code),
+      language_id: langId,
+      stdin:       encodeJudge64('')
+    };
+
+    // Judge0 status IDs that mean "still processing"
+    const PROCESSING_STATUSES = new Set([1, 2]); // In Queue, Processing
+    const MAX_POLLS = 30;
+    const POLL_INTERVAL_MS = 1000;
+
+    async function pollSubmission(token) {
+      for (let i = 0; i < MAX_POLLS; i++) {
+        const pollRes = await axios.get(
+          judge0Base + `/submissions/${token}?base64_encoded=true`,
+          { timeout: 10000 }
+        );
+        const pd = pollRes.data || {};
+        const statusId = pd.status?.id;
+        if (statusId != null && !PROCESSING_STATUSES.has(statusId)) {
+          return pd;
+        }
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      }
+      throw new Error('Judge0 submission timed out after polling.');
+    }
+
+    let d;
     try {
-      judgeRes = await axios.post(
-        judge0Base + '/submissions?base64_encoded=false&wait=true',
-        { source_code: code, language_id: langId, stdin: '' },
-        { timeout: 20000, headers: { 'Content-Type': 'application/json' } }
+      // Step 1: POST submission. Use wait=true as a best-effort, but always
+      // be prepared to fall back to polling because the public Judge0 CE
+      // instance may honour wait=true only up to an internal time budget.
+      const createRes = await axios.post(
+        judge0Base + '/submissions?base64_encoded=true&wait=true',
+        payload,
+        { timeout: 25000, headers: { 'Content-Type': 'application/json' } }
       );
+      const cd = createRes.data || {};
+      const statusId = cd.status?.id;
+      const hasToken = typeof cd.token === 'string' && cd.token.length > 0;
+
+      if (statusId != null && !PROCESSING_STATUSES.has(statusId)) {
+        // wait=true returned a completed result — great.
+        d = cd;
+      } else if (hasToken) {
+        // Still processing (or wait was ignored) — poll for the result.
+        d = await pollSubmission(cd.token);
+      } else {
+        // No status, no token: something was returned inline (possibly an
+        // error payload), surface it as-is so the decoded fields propagate.
+        d = cd;
+      }
     } catch (axErr) {
       const msg = axErr.response?.data?.error || axErr.message || 'Judge0 unreachable';
       console.error('[run-code] judge0 error:', msg);
       return res.status(502).json({ success: false, message: 'Code execution service error: ' + msg });
     }
 
-    const d = judgeRes.data || {};
-    const stdout         = d.stdout  || '';
-    const stderr         = d.stderr  || d.compile_output || '';
+    const stdout         = decodeJudge64(d.stdout);
+    const stderr         = decodeJudge64(d.stderr);
+    const compile_output = decodeJudge64(d.compile_output);
+    const message        = decodeJudge64(d.message);
     const statusDesc     = d.status?.description || 'Unknown';
-    const exitCode       = d.status?.id === 3 ? 0 : (d.status?.id || null); // 3 = Accepted
+    const statusId       = d.status?.id;
+    // Accepted (3) is the only clear "success" status id. Treat Runtime Error
+    // (10) etc as non-zero so the frontend can colour output correctly.
+    const exitCode       = statusId === 3 ? 0 : (statusId || null);
 
-    const output = (stdout + (stderr ? '\n--- error ---\n' + stderr : '')).trim();
+    const errorTail = [stderr, compile_output, message]
+      .map(t => t && t.trim() ? t.trim() : '')
+      .filter(Boolean)
+      .join('\n---\n');
+    const output = (stdout + (errorTail ? '\n--- error ---\n' + errorTail : '')).trim();
 
     return res.json({
       success: true, shuffled_group, language, submitted_by: submittedBy,
-      stdout, stderr,
+      stdout, stderr, compile_output, message,
       output:    output || '(no output)',
       exit_code: exitCode,
       status:    statusDesc
