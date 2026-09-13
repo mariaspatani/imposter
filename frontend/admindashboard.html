@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -391,13 +391,11 @@ async function fetchAll(){
 
 async function loadTimers(){
     try {
-        const r = await apiFetch(API+'/api/event-timers', { headers: authHeaders() });
+        const r = await fetch(API+'/api/event-timers', { headers: authHeaders() });
         const d = await r.json();
-        // Normalise: API returns { success, timers:[...] } or a raw array
         const timers = Array.isArray(d) ? d : (d.timers || d.data || []);
         if(timers.length > 0) {
             allTimers = timers;
-            // Only re-render timer cards if the timers tab is visible (avoid DOM churn)
             const timersTab = document.getElementById('tab-timers');
             if(timersTab && !timersTab.classList.contains('hidden')) {
                 renderTimers();
@@ -955,6 +953,22 @@ function timerStatusLabel(status){
     return '⏺ Idle';
 }
 
+function getTimerRemainingSeconds(t) {
+    const durSecs = t.duration_minutes ? t.duration_minutes * 60 : (t.duration_seconds || t.duration_secs || 900);
+    if (t.status === 'finished') return 0;
+    if (t.status === 'running') {
+        if (t.ends_at) {
+            return Math.max(0, Math.floor((new Date(t.ends_at).getTime() - Date.now()) / 1000));
+        }
+        if (t.started_at) {
+            const baseRem = (t.remaining_seconds != null && t.remaining_seconds > 0) ? Number(t.remaining_seconds) : durSecs;
+            const elapsed = Math.floor((Date.now() - new Date(t.started_at).getTime()) / 1000);
+            return Math.max(0, baseRem - elapsed);
+        }
+    }
+    return t.remaining_seconds != null ? Number(t.remaining_seconds) : durSecs;
+}
+
 function renderTimers(){
     const grid = document.getElementById('timers-grid');
     if(!grid) return;
@@ -964,41 +978,31 @@ function renderTimers(){
         return;
     }
 
-    // Clear any old per-card intervals (legacy cleanup)
-    Object.values(timerCountdowns).forEach(clearInterval);
-    timerCountdowns = {};
-
     grid.innerHTML = allTimers.map(t => {
         const key    = t.event_key || t.event_name;
         const enc    = key.replace(/[^a-zA-Z0-9]/g,'_');
         const sColor = timerStatusColor(t.status);
-        const durSecs = t.duration_minutes ? t.duration_minutes*60 : (t.duration_secs||900);
+        const durSecs = t.duration_minutes ? t.duration_minutes*60 : (t.duration_seconds||t.duration_secs||900);
+        const displaySeconds = getTimerRemainingSeconds(t);
 
-        // Calculate live displaySeconds using started_at offset
-        let displaySeconds = t.remaining_seconds != null ? t.remaining_seconds : (t.remaining_secs != null ? t.remaining_secs : 0);
-        if (t.status === 'running' && t.started_at) {
-            const elapsed = Math.floor((Date.now() - new Date(t.started_at).getTime()) / 1000);
-            displaySeconds = Math.max(0, displaySeconds - elapsed);
-        }
-
-        return `<div class="bg-cardgray border border-bordergray rounded-2xl p-5 shadow-xl space-y-4">
+        return `<div class="bg-cardgray border border-bordergray rounded-2xl p-5 shadow-xl space-y-4" id="timer-card-${enc}">
             <div class="flex items-center justify-between">
                 <h3 class="text-sm font-orbitron font-bold text-white">${e(t.event_name)}</h3>
                 <span class="text-xs font-orbitron ${sColor}" id="ts-label-${enc}">${timerStatusLabel(t.status)}</span>
             </div>
             <div class="text-center">
-                <div class="text-4xl font-orbitron font-bold ${sColor} tracking-widest" id="ts-display-${enc}">${fmtSecs(displaySeconds)}</div>
+                <div class="text-4xl font-orbitron font-bold ${sColor} tracking-widest font-mono" id="ts-display-${enc}">${fmtSecs(displaySeconds)}</div>
                 <div class="text-xs text-gray-500 mt-1 font-orbitron">/ ${fmtSecs(durSecs)} total</div>
             </div>
             <div class="flex gap-2 flex-wrap justify-center">
                 <button onclick="timerAction('${e(key)}','start',this)"
-                    class="text-xs font-orbitron px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600 hover:text-white transition-all"
+                    class="text-xs font-orbitron px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     ${t.status==='running'||t.status==='finished'?'disabled':''}>▶ Start</button>
                 <button onclick="timerAction('${e(key)}','pause',this)"
-                    class="text-xs font-orbitron px-3 py-1.5 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600 hover:text-white transition-all"
+                    class="text-xs font-orbitron px-3 py-1.5 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     ${t.status!=='running'?'disabled':''}>⏸ Pause</button>
                 <button onclick="timerAction('${e(key)}','resume',this)"
-                    class="text-xs font-orbitron px-3 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 hover:bg-cyan-600 hover:text-white transition-all"
+                    class="text-xs font-orbitron px-3 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 hover:bg-cyan-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     ${t.status!=='paused'?'disabled':''}>▶▶ Resume</button>
                 <button onclick="timerAction('${e(key)}','reset',this)"
                     class="text-xs font-orbitron px-3 py-1.5 rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/30 hover:bg-rose-600 hover:text-white transition-all">↺ Reset</button>
@@ -1007,12 +1011,43 @@ function renderTimers(){
     }).join('');
 }
 
-// ── 1-second live refresh for timer cards when any timer is running ────────────
+// ── Smooth local 1-second ticking without destroying DOM ───────────────────────
+var _localTimerTickInterval = null;
+
+function tickLocalTimers(){
+    if(!allTimers || allTimers.length === 0) return;
+    allTimers.forEach(t => {
+        const key = t.event_key || t.event_name;
+        const enc = key.replace(/[^a-zA-Z0-9]/g,'_');
+        const disp = document.getElementById('ts-display-' + enc);
+        if(!disp) return;
+
+        const rem = getTimerRemainingSeconds(t);
+        disp.textContent = fmtSecs(rem);
+
+        if(t.status === 'running' && rem <= 0) {
+            t.status = 'finished';
+            const lbl = document.getElementById('ts-label-' + enc);
+            if(lbl) {
+                lbl.textContent = timerStatusLabel('finished');
+                lbl.className = 'text-xs font-orbitron ' + timerStatusColor('finished');
+            }
+            disp.className = 'text-4xl font-orbitron font-bold ' + timerStatusColor('finished') + ' tracking-widest font-mono';
+            loadTimers();
+        }
+    });
+}
+
+if(!_localTimerTickInterval){
+    _localTimerTickInterval = setInterval(tickLocalTimers, 1000);
+}
+
+// ── Periodic server sync for timer cards (every 5 seconds) ────────────────────
 var _timerRefreshInterval = null;
 
 function startTimerRefresh(){
-    if(_timerRefreshInterval) return;  // already running
-    _timerRefreshInterval = setInterval(loadTimers, 1000);
+    if(_timerRefreshInterval) return;
+    _timerRefreshInterval = setInterval(loadTimers, 5000);
 }
 
 function stopTimerRefresh(){
@@ -1020,7 +1055,6 @@ function stopTimerRefresh(){
     _timerRefreshInterval = null;
 }
 
-// Called after loadTimers updates allTimers — start/stop 1s refresh as needed
 function syncTimerRefresh(){
     const anyRunning = allTimers.some(t => t.status === 'running');
     if(anyRunning) startTimerRefresh();
@@ -1031,21 +1065,29 @@ async function timerAction(eventKey, action, btn){
     const orig = btn.textContent;
     btn.disabled = true; btn.textContent = '...';
     try {
-        // New schema: /api/event/start|pause|resume|reset with body {eventKey}
         const r = await fetch(`${API}/api/event/${action}`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify({ eventKey })
         });
+        if (r.status === 401) {
+            btn.textContent = orig;
+            btn.disabled = false;
+            document.getElementById('login-modal').style.display = 'flex';
+            alert('Admin authentication required. Please enter admin password.');
+            return;
+        }
         const d = await r.json();
         if(!d.success) {
             btn.textContent = '❌';
+            alert(d.message || 'Action failed');
             setTimeout(()=>{ btn.textContent=orig; btn.disabled=false; }, 1500);
             return;
         }
         await loadTimers();
     } catch(ex) {
         btn.textContent = '❌';
+        alert('Error: ' + ex.message);
         setTimeout(()=>{ btn.textContent=orig; btn.disabled=false; }, 1500);
     }
 }
