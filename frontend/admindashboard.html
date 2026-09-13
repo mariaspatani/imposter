@@ -303,6 +303,8 @@ let manualScores      = {};
 let eventProgress     = {};
 let allTimers         = [];   // from /api/event-timers (real event_timers table)
 let fizzSubmissions   = [];   // from /api/admin/fizzbuzz/submissions
+let fizzbuzzScores    = {};   // { teamName: marks } from /api/admin/fizzbuzz-scores
+let mainEventParticipants = []; // from /api/admin/main-event-scores
 let timerCountdowns   = {};   // local interval handles keyed by event name
 
 // ── Stopwatch ──────────────────────────────────────────────────────────────────
@@ -345,23 +347,32 @@ async function fetchAll(){
     try {
         const ah = { headers: authHeaders() };
         const safeJson = r => r.json().catch(() => ({ success: false }));
-        const [r1,r2,r3,r4,r5,r6,r7] = await Promise.all([
+        const [r1,r2,r3,r4,r5,r6,r7,r8,r9] = await Promise.all([
             apiFetch(API+'/api/admin/participants',ah).then(safeJson).catch(()=>({success:false})),
             apiFetch(API+'/api/admin/team-scores',ah).then(safeJson).catch(()=>({success:false})),
             apiFetch(API+'/api/admin/podium',ah).then(safeJson).catch(()=>({success:false})),
             apiFetch(API+'/api/admin/manual-scores',ah).then(safeJson).catch(()=>({success:false})),
             apiFetch(API+'/api/admin/event-progress',ah).then(safeJson).catch(()=>({success:false})),
             apiFetch(API+'/api/event-timers',ah).then(safeJson).catch(()=>({success:false})),
-            apiFetch(API+'/api/admin/fizzbuzz/submissions-v2',ah).then(safeJson).catch(()=>({success:false}))
+            apiFetch(API+'/api/admin/fizzbuzz/all-submissions',ah).then(safeJson).catch(()=>({success:false})),
+            apiFetch(API+'/api/admin/fizzbuzz-scores',ah).then(safeJson).catch(()=>({success:false})),
+            apiFetch(API+'/api/admin/main-event-scores',ah).then(safeJson).catch(()=>({success:false}))
         ]);
-        allParticipants = r1.success ? (r1.participants||[]) : [];
-        teamScores      = r2.success ? (r2.scores||[])       : [];
-        podiumData      = r3.success ? (r3.podium||[])        : [];
-        eventProgress   = r5.success ? (r5.progress||{})     : {};
-        allTimers       = Array.isArray(r6) ? r6 : (r6.timers || r6.data || []);
-        fizzSubmissions = r7.success ? (r7.submissions||[])   : [];
+        allParticipants       = r1.success ? (r1.participants||[]) : [];
+        teamScores            = r2.success ? (r2.scores||[])       : [];
+        podiumData            = r3.success ? (r3.podium||[])        : [];
+        eventProgress         = r5.success ? (r5.progress||{})     : {};
+        allTimers             = Array.isArray(r6) ? r6 : (r6.timers || r6.data || []);
+        fizzSubmissions       = r7.success ? (r7.submissions||[])   : [];
+        mainEventParticipants = r9.success ? (r9.participants||[])  : [];
 
-        // manual_event_scores_v2 returns flat rows: { original_team, code_imposter, sherlock, drawing }
+        // Build fizzbuzzScores lookup { teamName: marks }
+        fizzbuzzScores = {};
+        (r8.success ? (r8.scores||[]) : []).forEach(s => {
+            if (s.original_team) fizzbuzzScores[s.original_team] = s.marks;
+        });
+
+        // manual_event_scores_v2: { original_team, code_imposter, sherlock, drawing }
         manualScores={};
         MANUAL_EVENTS.forEach(ev=>{ manualScores[ev]={}; });
         (r4.success ? (r4.scores||[]) : []).forEach(s=>{
@@ -616,19 +627,23 @@ async function recoverEvaluations(btn){
 // FEATURE 9 + 10 — MANUAL SCORING
 // ══════════════════════════════════════════════════════════════════════════════
 function renderManual(){
+    // allParticipants comes from /api/admin/participants → main_event_assignments SELECT *
+    // It has: participant_id, participant_name, original_team, shuffled_group,
+    //         is_imposter, role_name, fizzbuzz_score, imposter_bonus, ai_score, main_event_score
     const teams = [...new Set(allParticipants.map(p=>p.original_team).filter(Boolean))].sort();
-    if(teams.length===0){
-        document.getElementById('manual-events-grid').innerHTML='<div class="col-span-3 text-gray-500 font-orbitron text-sm text-center py-8">Run shuffle first to see teams.</div>';
-        return;
-    }
+    let html = '';
 
-    document.getElementById('manual-events-grid').innerHTML = MANUAL_EVENTS.map(ev=>`
+    // ── Code Imposter / Sherlock / Drawing cards ──────────────────────────────
+    if (teams.length === 0) {
+        html = '<div class="col-span-3 text-gray-500 font-orbitron text-sm text-center py-8">No participants registered yet.</div>';
+    } else {
+        html = MANUAL_EVENTS.map(ev => `
         <div class="bg-cardgray border border-bordergray rounded-2xl p-5 shadow-xl space-y-4">
             <h3 class="text-xs font-orbitron font-bold text-crimson-500 uppercase tracking-wider">${e(ev)}</h3>
-            <div class="space-y-3" id="manual-event-${ev.replace(/\s/g,'_')}">
-                ${teams.map(team=>{
+            <div class="space-y-3">
+                ${teams.map(team => {
                     const existing = (manualScores[ev]||{})[team];
-                    const hasVal   = existing!=null && existing!==undefined;
+                    const hasVal   = existing != null && existing !== undefined;
                     return `<div class="bg-black/40 border border-bordergray rounded-xl p-3">
                         <div class="text-xs font-orbitron text-gray-300 mb-2">${e(team)}</div>
                         <div class="flex gap-2">
@@ -645,6 +660,161 @@ function renderManual(){
                 }).join('')}
             </div>
         </div>`).join('');
+    }
+
+    // ── FIZZBUZZ card — Group 1–6 accordion ──────────────────────────────────
+    // Source: allParticipants (from main_event_assignments) — always populated after shuffle
+    const fbGroups = {};
+    allParticipants.forEach(p => {
+        const g = (p.shuffled_group || '').trim();
+        if (!g) return;
+        if (!fbGroups[g]) fbGroups[g] = [];
+        fbGroups[g].push(p);
+    });
+    const groupKeys = Object.keys(fbGroups).sort((a, b) => {
+        const na = parseInt(a.replace(/\D/g, '')) || 99;
+        const nb = parseInt(b.replace(/\D/g, '')) || 99;
+        return na - nb;
+    });
+
+    let fbAccordions;
+    if (groupKeys.length === 0) {
+        fbAccordions = '<div class="text-gray-500 text-xs text-center py-4 font-orbitron">No assignments found. Run shuffle first.</div>';
+    } else {
+        fbAccordions = groupKeys.map(g => {
+            const members  = fbGroups[g];
+            const imposter = members.find(m => m.is_imposter);
+
+            // Base score = non-imposter member's fizzbuzz_score (imposter gets score+10 so isn't reliable as base)
+            const baseMember = members.find(m => !m.is_imposter) || members[0];
+            const rawScore   = Number(baseMember?.fizzbuzz_score ?? 0);
+            // Treat 0 as unsaved (DB default is 0); only consider "has saved value" if > 0
+            const hasVal     = rawScore > 0;
+            const savedScore = hasVal ? rawScore : '';
+            const impSaved   = Number(imposter?.imposter_bonus ?? 0) > 0;
+            const gid        = g.replace(/\s/g, '_');
+
+            const memberRows = members.map(m => `
+                <tr class="border-b border-bordergray/30">
+                    <td class="py-2 pr-3 text-xs font-rajdhani text-gray-200">
+                        ${e(m.participant_name)}
+                        ${m.is_imposter ? '<span class="inline-block bg-rose-600/20 border border-rose-500/40 text-rose-400 text-[9px] font-orbitron px-1.5 py-0.5 rounded ml-1 align-middle">IMPOSTER</span>' : ''}
+                    </td>
+                    <td class="py-2 text-xs font-mono text-gray-400 text-right">${e(m.original_team || '—')}</td>
+                </tr>`).join('');
+
+            return `
+            <div class="bg-black/40 border border-bordergray rounded-xl overflow-hidden">
+                <button onclick="toggleFbAccordion('${gid}')"
+                    class="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/5 transition-all">
+                    <div>
+                        <div class="text-xs font-orbitron font-bold text-cyan-400">${e(g)}</div>
+                        <div class="text-[10px] text-gray-500 font-rajdhani mt-0.5">
+                            Shuffled Team · ${members.length} Members
+                            ${hasVal ? ' · <span class="text-emerald-400">Scored: ' + savedScore + ' pts</span>' : ''}
+                        </div>
+                    </div>
+                    <span id="fb-chevron-${gid}" class="text-gray-400 text-xs" style="display:inline-block;transition:transform .2s">▼</span>
+                </button>
+                <div id="fb-body-${gid}" class="hidden px-4 pb-4 space-y-4 border-t border-bordergray/40">
+                    <div class="pt-3">
+                        <div class="text-[10px] font-orbitron text-gray-400 uppercase tracking-wider mb-2">Team Members</div>
+                        <table class="w-full">
+                            <thead><tr class="border-b border-bordergray/50">
+                                <th class="text-left pb-1 text-[10px] font-orbitron text-gray-500">Participant</th>
+                                <th class="text-right pb-1 text-[10px] font-orbitron text-gray-500">Original Team</th>
+                            </tr></thead>
+                            <tbody>${memberRows}</tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <div class="text-[10px] font-orbitron text-gray-400 uppercase tracking-wider mb-2">Group Score</div>
+                        <div class="flex gap-2">
+                            <input type="number" min="0" max="100"
+                                value="${savedScore}"
+                                placeholder="Enter score (0–100)"
+                                id="fzg_${gid}"
+                                class="flex-1 bg-black border border-bordergray rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-cyan-500">
+                            <button onclick="saveFizzBuzzGroupScore('${e(g)}','${gid}',this)"
+                                class="text-xs font-orbitron px-4 py-2 rounded-lg ${hasVal ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600' : 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600'} hover:text-white transition-all whitespace-nowrap">
+                                ${hasVal ? 'Update' : 'Save Score'}
+                            </button>
+                        </div>
+                        ${hasVal ? `<div class="text-emerald-400 text-[10px] mt-1 font-orbitron">Saved: ${savedScore} pts${impSaved ? ' &nbsp;·&nbsp; Imposter: ' + (imposter?.fizzbuzz_score || 0) + ' pts (+10 bonus)' : ''}</div>` : ''}
+                    </div>
+                    ${imposter ? `
+                    <div>
+                        <div class="text-[10px] font-orbitron text-gray-400 uppercase tracking-wider mb-2">Imposter Bonus</div>
+                        <label class="flex items-start gap-3 cursor-pointer group">
+                            <input type="checkbox" id="fzb_${gid}" ${impSaved ? 'checked' : ''}
+                                class="mt-0.5 w-4 h-4 accent-rose-500 cursor-pointer flex-shrink-0">
+                            <span class="text-xs font-rajdhani text-gray-300 group-hover:text-white transition-colors">
+                                Give +10 bonus to Imposter (FizzBuzz sabotage successful)
+                            </span>
+                        </label>
+                        <div class="text-[10px] text-gray-500 font-rajdhani mt-1 ml-7">Only the Imposter gets +10. Other 3 members keep the original group score.</div>
+                    </div>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    html += `
+        <div class="bg-cardgray border border-bordergray rounded-2xl p-5 shadow-xl space-y-4 col-span-1 md:col-span-3">
+            <h3 class="text-xs font-orbitron font-bold text-crimson-500 uppercase tracking-wider">FizzBuzz</h3>
+            <div class="space-y-2">${fbAccordions}</div>
+        </div>`;
+
+    // ── MAIN EVENT card — individual scores per participant ───────────────────
+    // Source: allParticipants sorted by shuffled_group then slot
+    const meSorted = [...allParticipants].sort((a, b) => {
+        const gA = parseInt((a.shuffled_group || '').replace(/\D/g, '')) || 99;
+        const gB = parseInt((b.shuffled_group || '').replace(/\D/g, '')) || 99;
+        if (gA !== gB) return gA - gB;
+        return (a.person_slot || 0) - (b.person_slot || 0);
+    });
+
+    let meRows;
+    if (meSorted.length === 0) {
+        meRows = '<div class="text-gray-500 text-xs text-center py-4 font-orbitron col-span-3">No participants found.</div>';
+    } else {
+        meRows = meSorted.map(p => {
+            const rawScore = Number(p.ai_score ?? 0);
+            const hasVal   = rawScore > 0;
+            const existing = hasVal ? rawScore : '';
+            const pid      = String(p.participant_id).replace(/-/g, '_');
+            return `<div class="bg-black/40 border border-bordergray rounded-xl p-3">
+                <div class="mb-2">
+                    <div class="text-xs font-orbitron text-gray-200 font-bold flex items-center gap-2 flex-wrap">
+                        ${e(p.participant_name)}
+                        ${p.is_imposter ? '<span class="bg-rose-600/20 border border-rose-500/40 text-rose-400 text-[9px] font-orbitron px-1.5 py-0.5 rounded">IMPOSTER</span>' : ''}
+                    </div>
+                    <div class="text-[10px] font-mono text-gray-500 mt-0.5">
+                        ${e(p.original_team||'—')} · ${e(p.shuffled_group||'—')} · ${e(p.role_name||'—')}
+                        ${p.github_repo ? ` · <a href="${e(p.github_repo)}" target="_blank" class="text-cyan-400 hover:underline">🔗 Repo</a>` : ''}
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <input type="number" min="0" max="100" value="${existing}" placeholder="0–100"
+                        id="me_${pid}"
+                        class="flex-1 bg-black border border-bordergray rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:outline-none focus:border-crimson-500">
+                    <button onclick="saveMainEventScore('${e(p.participant_id)}',this)"
+                        class="text-xs font-orbitron px-3 py-1.5 rounded-lg ${hasVal?'bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600':'bg-crimson-600/20 text-crimson-500 border border-crimson-600/30 hover:bg-crimson-600'} hover:text-white transition-all">
+                        ${hasVal?'Update':'Save'}
+                    </button>
+                </div>
+                ${hasVal ? `<div class="text-emerald-400 text-[10px] mt-1 font-orbitron">Saved: ${existing} pts</div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    html += `
+        <div class="bg-cardgray border border-bordergray rounded-2xl p-5 shadow-xl space-y-4 col-span-1 md:col-span-3">
+            <h3 class="text-xs font-orbitron font-bold text-crimson-500 uppercase tracking-wider">Main Event — Individual Scores</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">${meRows}</div>
+        </div>`;
+
+    document.getElementById('manual-events-grid').innerHTML = html;
 }
 
 async function saveManualScore(event_name, original_team, btn){
@@ -668,6 +838,54 @@ async function saveManualScore(event_name, original_team, btn){
         btn.disabled=false;
         alert('Network error: '+ex.message);
     }
+}
+
+async function saveFizzBuzzGroupScore(shuffled_group, gid, btn){
+    const scoreInput = document.getElementById('fzg_'+gid);
+    const bonusInput = document.getElementById('fzb_'+gid);
+    const val = Number(scoreInput?.value);
+    if(isNaN(val)||val<0||val>100){ alert('Enter a valid score (0–100)'); return; }
+    const imposter_bonus = bonusInput ? bonusInput.checked : false;
+    btn.disabled=true; btn.innerText='Saving...';
+    try{
+        const r = await apiFetch(API+'/api/admin/save-fizzbuzz-group-score',{
+            method:'POST', headers:authHeaders(),
+            body:JSON.stringify({ shuffled_group, group_score: val, imposter_bonus })
+        });
+        const d = await r.json();
+        if(r.ok && d.success){
+            await fetchAll(); renderManual(); renderPodium(); renderOverview();
+        } else {
+            btn.innerText='❌ Failed'; btn.disabled=false;
+            alert('Save failed: '+(d.message||JSON.stringify(d)));
+        }
+    }catch(ex){ btn.innerText='❌ Error'; btn.disabled=false; alert('Network error: '+ex.message); }
+}
+
+function toggleFbAccordion(gid){
+    const body    = document.getElementById('fb-body-'+gid);
+    const chevron = document.getElementById('fb-chevron-'+gid);
+    if(!body) return;
+    const isOpen = !body.classList.contains('hidden');
+    body.classList.toggle('hidden', isOpen);
+    if(chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
+async function saveMainEventScore(participant_id, btn){
+    const inputId = 'me_'+participant_id.replace(/-/g,'_');
+    const val = Number(document.getElementById(inputId)?.value);
+    if(isNaN(val)||val<0||val>100){ alert('Enter a valid score (0–100)'); return; }
+    btn.disabled=true; btn.innerText='Saving...';
+    try{
+        const r=await fetch(API+'/api/admin/save-main-event-score',{method:'POST',headers:authHeaders(),body:JSON.stringify({participant_id,score:val})});
+        const d=await r.json();
+        if(r.ok&&d.success){
+            await fetchAll(); renderManual(); renderPodium(); renderOverview();
+        } else {
+            btn.innerText='❌ Failed'; btn.disabled=false;
+            alert('Save failed: '+(d.message||JSON.stringify(d)));
+        }
+    }catch(ex){ btn.innerText='❌ Error'; btn.disabled=false; alert('Network error: '+ex.message); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -860,24 +1078,56 @@ function renderFizzBuzzMonitor(){
         return;
     }
 
-    container.innerHTML = allGroups.map((gn, idx) => {
-        const sub = subByGroup[gn];
+    container.innerHTML = allGroups.map((gn) => {
+        const sub  = subByGroup[gn];
+        const gid  = gn.replace(/\s/g,'_');
+
         if(sub){
             const scored = sub.is_correct !== null && sub.is_correct !== undefined;
             const time   = sub.submitted_at ? new Date(sub.submitted_at).toLocaleTimeString() : '--';
             const rank   = fizzSubmissions.findIndex(s=>s.shuffled_group===gn)+1;
-            return `<div class="bg-black/40 border border-emerald-500/30 rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                    <span class="font-orbitron text-xs font-bold text-emerald-400">${e(gn)}</span>
-                    <span class="ml-2 text-[10px] text-gray-400">#${rank} · by ${e(sub.submitted_by)} · ${time}</span>
-                    ${sub.imposter_sabotaged ? '<span class="ml-2 text-[9px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-1 rounded font-orbitron">⚠ SABOTAGE DETECTED</span>' : ''}
+            const lang   = sub.language || 'Unknown';
+            // Escape code for inline HTML attribute (stored in a hidden span, not attribute)
+            return `<div class="bg-black/40 border border-emerald-500/30 rounded-xl overflow-hidden">
+                <!-- Header row -->
+                <div class="flex items-center justify-between gap-3 flex-wrap px-4 py-3">
+                    <div>
+                        <span class="font-orbitron text-xs font-bold text-emerald-400">${e(gn)}</span>
+                        <span class="ml-2 text-[10px] text-gray-400">#${rank} · by ${e(sub.submitted_by)} · ${time}</span>
+                        <span class="ml-1 text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-1.5 py-0.5 rounded font-orbitron">${e(lang)}</span>
+                        ${sub.imposter_sabotaged ? '<span class="ml-1 text-[9px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-1.5 py-0.5 rounded font-orbitron">⚠ SABOTAGE</span>' : ''}
+                    </div>
+                    <div class="flex gap-2 items-center flex-wrap">
+                        ${scored
+                            ? `<span class="text-[10px] font-orbitron ${sub.is_correct?'text-emerald-400':'text-rose-400'}">${sub.is_correct?'✅ Correct':'❌ Wrong'}</span>`
+                            : `<button onclick="scoreFizzGroup('${e(gn)}',true,this)"  class="text-xs font-orbitron px-2.5 py-1 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-600 hover:text-white transition-all">✅ Correct</button>
+                               <button onclick="scoreFizzGroup('${e(gn)}',false,this)" class="text-xs font-orbitron px-2.5 py-1 rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/20 hover:bg-rose-600 hover:text-white transition-all">❌ Wrong</button>`
+                        }
+                        <button onclick="fbViewCode('${gid}')"
+                            class="text-xs font-orbitron px-2.5 py-1 rounded-lg bg-violet-600/20 text-violet-400 border border-violet-500/20 hover:bg-violet-600 hover:text-white transition-all">
+                            📄 View Submission
+                        </button>
+                        <button onclick="fbRunCode('${e(gn)}','${gid}',this)"
+                            class="text-xs font-orbitron px-2.5 py-1 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/20 hover:bg-amber-600 hover:text-white transition-all">
+                            ▶ Run Code
+                        </button>
+                    </div>
                 </div>
-                <div class="flex gap-2 items-center">
-                    ${scored
-                        ? `<span class="text-[10px] font-orbitron ${sub.is_correct?'text-emerald-400':'text-rose-400'}">${sub.is_correct?'✅ Correct':'❌ Wrong'}</span>`
-                        : `<button onclick="scoreFizzGroup('${e(gn)}',true,this)"  class="text-xs font-orbitron px-2.5 py-1 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-600 hover:text-white transition-all">✅ Mark Correct</button>
-                           <button onclick="scoreFizzGroup('${e(gn)}',false,this)" class="text-xs font-orbitron px-2.5 py-1 rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/20 hover:bg-rose-600 hover:text-white transition-all">❌ Mark Wrong</button>`
-                    }
+                <!-- Code viewer (hidden by default) -->
+                <div id="fb-code-${gid}" class="hidden border-t border-bordergray/40">
+                    <div class="flex items-center justify-between px-4 py-2 bg-black/40">
+                        <span class="text-[10px] font-orbitron text-violet-400 uppercase tracking-wider">Source Code — ${e(lang)}</span>
+                        <span class="text-[10px] text-gray-500 font-rajdhani">Read-only · submitted by ${e(sub.submitted_by)}</span>
+                    </div>
+                    <pre id="fb-pre-${gid}" class="px-4 py-3 text-xs font-mono text-gray-200 bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-72 overflow-y-auto">${e(sub.fizz_output||'')}</pre>
+                </div>
+                <!-- Execution output panel (hidden by default) -->
+                <div id="fb-out-${gid}" class="hidden border-t border-bordergray/40">
+                    <div class="flex items-center justify-between px-4 py-2 bg-black/40">
+                        <span class="text-[10px] font-orbitron text-amber-400 uppercase tracking-wider">Execution Output</span>
+                        <span id="fb-out-status-${gid}" class="text-[10px] font-orbitron text-gray-500"></span>
+                    </div>
+                    <pre id="fb-out-pre-${gid}" class="px-4 py-3 text-xs font-mono text-emerald-300 bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-60 overflow-y-auto">Running...</pre>
                 </div>
             </div>`;
         } else {
@@ -887,6 +1137,62 @@ function renderFizzBuzzMonitor(){
             </div>`;
         }
     }).join('');
+}
+
+function fbViewCode(gid){
+    const panel   = document.getElementById('fb-code-'+gid);
+    if(!panel) return;
+    const isOpen  = !panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', isOpen);
+}
+
+async function fbRunCode(shuffled_group, gid, btn){
+    const outPanel  = document.getElementById('fb-out-'+gid);
+    const outPre    = document.getElementById('fb-out-pre-'+gid);
+    const outStatus = document.getElementById('fb-out-status-'+gid);
+    if(!outPanel || !outPre) return;
+
+    // Show code viewer too so context is visible
+    const codePanel = document.getElementById('fb-code-'+gid);
+    if(codePanel) codePanel.classList.remove('hidden');
+
+    // Show output panel with loading state
+    outPanel.classList.remove('hidden');
+    outPre.textContent  = 'Running…';
+    outPre.className    = 'px-4 py-3 text-xs font-mono text-gray-400 bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-60 overflow-y-auto';
+    if(outStatus) outStatus.textContent = '';
+
+    const origText  = btn.textContent;
+    btn.disabled    = true;
+    btn.textContent = '⏳ Running…';
+
+    try {
+        const r = await apiFetch(API+'/api/admin/fizzbuzz/run-code', {
+            method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ shuffled_group })
+        });
+        const d = await r.json();
+
+        if(d.success){
+            const hasStderr = (d.stderr||'').trim().length > 0;
+            const exitOk    = d.exit_code === 0 || d.exit_code === null;
+            outPre.textContent = d.output || '(no output)';
+            outPre.className   = 'px-4 py-3 text-xs font-mono ' +
+                (hasStderr || !exitOk ? 'text-rose-300' : 'text-emerald-300') +
+                ' bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-60 overflow-y-auto';
+            if(outStatus) outStatus.textContent = exitOk ? '✅ Exit 0' : `⚠ Exit ${d.exit_code}`;
+        } else {
+            outPre.textContent = '❌ ' + (d.message || 'Execution failed');
+            outPre.className   = 'px-4 py-3 text-xs font-mono text-rose-400 bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-60 overflow-y-auto';
+            if(outStatus) outStatus.textContent = '❌ Error';
+        }
+    } catch(ex){
+        outPre.textContent = '❌ Network error: ' + ex.message;
+        outPre.className   = 'px-4 py-3 text-xs font-mono text-rose-400 bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-60 overflow-y-auto';
+    }
+
+    btn.disabled    = false;
+    btn.textContent = origText;
 }
 
 async function scoreFizzGroup(shuffled_group, is_correct, btn){

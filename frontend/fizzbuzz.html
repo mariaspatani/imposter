@@ -233,15 +233,20 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
 
         async function loadStatus(){
             try {
-                // Check toggle
+                // Use /api/fizzbuzz/toggle — returns live computed remaining_seconds
                 var tr = await fetch(API_BASE + '/api/fizzbuzz/toggle');
                 var td = await tr.json();
                 if (!td.success) { showState('waiting'); return; }
 
-                // Only show expired if actually finished AND time really ran out
-                if (td.status === 'finished' || (td.remaining_seconds !== undefined && td.remaining_seconds <= 0 && td.status !== 'running')) {
+                var liveRemaining = Math.max(0, td.remaining_seconds || 0);
+
+                // Expired: status=finished, OR running/any with remaining=0
+                // (server hasn't auto-transitioned status yet when remaining hits 0)
+                if (td.status === 'finished' || liveRemaining <= 0) {
                     showState('expired'); return;
                 }
+
+                // Not open yet
                 if (!td.fizzbuzz_open) { showState('waiting'); return; }
 
                 // Get participant info + role
@@ -266,19 +271,15 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
                 document.getElementById('info-team').innerText  = ORIGINAL_TEAM || '--';
 
                 if (shuffledGroup) {
-                    // Show the group value directly
                     document.getElementById('info-group').innerText = shuffledGroup;
                     document.getElementById('info-group-select').style.display = 'none';
-                    // Persist for coding page
                     localStorage.setItem('fizzbuzz_group', shuffledGroup);
                 } else {
-                    // Fallback: show dropdown so participant can self-select
                     document.getElementById('info-group').style.display = 'none';
                     document.getElementById('info-group-select').style.display = 'inline-block';
                 }
 
                 // Classified mission for Imposter only
-                // Use my-assignment as authoritative source for is_imposter
                 var isImposter = (ad.success && ad.is_imposter) ? true : false;
                 if (!isImposter) {
                     try {
@@ -292,22 +293,34 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
                 if (isImposter) {
                     document.getElementById('classified-section').style.display = 'block';
                 }
+
+                // Stop polling once open
+                if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+
             } catch(e) {
                 showState('waiting');
             }
         }
 
-        // Poll for status change while waiting
+        // Poll every 3s while waiting for the round to open or close
         pollInterval = setInterval(async function(){
             try {
                 var r = await fetch(API_BASE + '/api/fizzbuzz/toggle');
                 var d = await r.json();
-                if (d.fizzbuzz_open || d.status === 'finished') {
-                    clearInterval(pollInterval);
+                var liveRemaining = Math.max(0, d.remaining_seconds || 0);
+                // Round opened → load full status
+                if (d.fizzbuzz_open && liveRemaining > 0) {
+                    clearInterval(pollInterval); pollInterval = null;
                     loadStatus();
+                    return;
+                }
+                // Round finished → show expired
+                if (d.status === 'finished' || liveRemaining <= 0) {
+                    clearInterval(pollInterval); pollInterval = null;
+                    showState('expired');
                 }
             } catch(e){}
-        }, 4000);
+        }, 3000);
 
         loadStatus();
     </script>
