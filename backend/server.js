@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const express   = require('express');
 const cors      = require('cors');
@@ -266,7 +266,8 @@ app.post('/api/authenticate', authLimiter, async (req, res) => {
 app.get('/api/my-assignment/:participantId', async (req, res) => {
   try {
     const participantId = String(req.params.participantId || '').trim();
-    if (!isUUID(participantId)) {
+    // participant_id is INTEGER in main_event_assignments — accept digits or UUID
+    if (!(/^\d+$/.test(participantId) || isUUID(participantId))) {
       return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
     }
 
@@ -447,7 +448,8 @@ app.get('/api/fizzbuzz/toggle', async (req, res) => {
 app.get('/api/fizzbuzz/status/:participantId', async (req, res) => {
   try {
     const participantId = String(req.params.participantId || '').trim();
-    if (!isUUID(participantId)) {
+    // participant_id is INTEGER in main_event_assignments — accept digits or UUID
+    if (!(/^\d+$/.test(participantId) || isUUID(participantId))) {
       return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
     }
 
@@ -506,7 +508,7 @@ app.post('/api/fizzbuzz/submit-v2', submitLimiter, async (req, res) => {
     const fizz_output    = String(req.body?.fizz_output    || req.body?.code || '').trim();
     const language       = String(req.body?.language       || 'Unknown').trim();
 
-    if (!isUUID(participant_id)) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
+    if (!(/^\d+$/.test(participant_id) || isUUID(participant_id))) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
     if (!fizz_output)            return res.status(400).json({ success: false, message: 'Code/output is required.' });
 
     const { data: assignment } = await supabase
@@ -705,7 +707,7 @@ app.get('/api/event-timers', async (req, res) => {
 app.get('/api/my-scores/:participantId', async (req, res) => {
   try {
     const participantId = String(req.params.participantId || '').trim();
-    if (!isUUID(participantId)) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
+    if (!(/^\d+$/.test(participantId) || isUUID(participantId))) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
 
     const { data, error } = await supabase
       .from('main_event_assignments')
@@ -1317,12 +1319,117 @@ app.get('/api/admin/manual-scores', requireAdmin, async (req, res) => {
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── GET /api/admin/fizzbuzz-scores ────────────────────────────────────────────
+app.get('/api/admin/fizzbuzz-scores', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('manual_event_scores')
+      .select('original_team, marks')
+      .eq('event_name', 'FizzBuzz');
+    if (error) return res.status(500).json({ success: false, message: error.message });
+    return res.json({ success: true, scores: data || [] });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── POST /api/admin/save-fizzbuzz-score ───────────────────────────────────────
+app.post('/api/admin/save-fizzbuzz-score', requireAdmin, async (req, res) => {
+  try {
+    const original_team = String(req.body?.original_team || '').trim();
+    const marks         = Number(req.body?.marks);
+    if (!original_team || isNaN(marks)) {
+      return res.status(400).json({ success: false, message: 'original_team and marks required.' });
+    }
+    const safeMarks = Math.min(100, Math.max(0, marks));
+    const now = new Date().toISOString();
+    const { data: ex } = await supabase.from('manual_event_scores')
+      .select('id').eq('event_name', 'FizzBuzz').eq('original_team', original_team).maybeSingle();
+    let error;
+    if (ex) {
+      ({ error } = await supabase.from('manual_event_scores')
+        .update({ marks: safeMarks, updated_at: now })
+        .eq('event_name', 'FizzBuzz').eq('original_team', original_team));
+    } else {
+      ({ error } = await supabase.from('manual_event_scores')
+        .insert({ event_name: 'FizzBuzz', original_team, marks: safeMarks, updated_at: now }));
+    }
+    if (error) { console.error('[fizzbuzz-score]', error); return res.status(500).json({ success: false, message: error.message }); }
+    return res.json({ success: true, marks: safeMarks });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── POST /api/admin/save-fizzbuzz-group-score ─────────────────────────────────
+// Saves group score to all members. Imposter gets +10 if imposterBonus=true.
+app.post('/api/admin/save-fizzbuzz-group-score', requireAdmin, async (req, res) => {
+  try {
+    const shuffled_group = String(req.body?.shuffled_group || req.body?.group || '').trim();
+    const raw_score      = req.body?.group_score ?? req.body?.score;
+    const group_score    = Number(raw_score);
+    const imposter_bonus = !!(req.body?.imposter_bonus || req.body?.imposterBonus);
+
+    if (!shuffled_group) return res.status(400).json({ success: false, message: 'shuffled_group is required.' });
+    if (!Number.isFinite(group_score) || group_score < 0 || group_score > 100) {
+      return res.status(400).json({ success: false, message: 'score must be 0–100.' });
+    }
+    const safeScore = Math.round(group_score);
+
+    const { data: members, error: fetchErr } = await supabase
+      .from('main_event_assignments')
+      .select('participant_id, is_imposter, participant_name, original_team')
+      .eq('shuffled_group', shuffled_group);
+
+    if (fetchErr) { console.error('[fizzbuzz-group-score fetch]', fetchErr); return res.status(500).json({ success: false, message: fetchErr.message }); }
+    if (!members || members.length === 0) return res.status(404).json({ success: false, message: 'No members found for: ' + shuffled_group });
+
+    const updated = [];
+    for (const m of members) {
+      const memberScore = (imposter_bonus && m.is_imposter) ? Math.min(110, safeScore + 10) : safeScore;
+      const bonusVal    = (imposter_bonus && m.is_imposter) ? 10 : 0;
+      const { error: updErr } = await supabase
+        .from('main_event_assignments')
+        .update({ fizzbuzz_score: memberScore, imposter_bonus: bonusVal })
+        .eq('participant_id', m.participant_id);
+      if (updErr) { console.error('[fizzbuzz-group-score update]', m.participant_id, updErr.message); }
+      else { updated.push({ participant_id: m.participant_id, name: m.participant_name, original_team: m.original_team, score: memberScore }); }
+    }
+
+    auditLog('fizzbuzz_group_score', shuffled_group, { group_score: safeScore, imposter_bonus });
+    return res.json({ success: true, shuffled_group, group_score: safeScore, imposter_bonus, updated });
+  } catch (err) { console.error('[fizzbuzz-group-score]', err.message); return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── GET /api/admin/main-event-scores ─────────────────────────────────────────
+app.get('/api/admin/main-event-scores', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('main_event_assignments')
+      .select('participant_id, participant_name, original_team, shuffled_group, role_name, github_repo, ai_score, submission_status, is_imposter, fizzbuzz_score, imposter_bonus')
+      .order('shuffled_group', { ascending: true });
+    if (error) return res.status(500).json({ success: false, message: error.message });
+    return res.json({ success: true, participants: data || [] });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── POST /api/admin/save-main-event-score ─────────────────────────────────────
+app.post('/api/admin/save-main-event-score', requireAdmin, async (req, res) => {
+  try {
+    const participant_id = String(req.body?.participant_id || '').trim();
+    const score          = Number(req.body?.score);
+    if (!participant_id || isNaN(score)) return res.status(400).json({ success: false, message: 'participant_id and score required.' });
+    const safeScore = Math.min(100, Math.max(0, score));
+    const { error } = await supabase.from('main_event_assignments')
+      .update({ ai_score: safeScore, main_event_score: safeScore })
+      .eq('participant_id', participant_id);
+    if (error) { console.error('[main-event-score]', error); return res.status(500).json({ success: false, message: error.message }); }
+    return res.json({ success: true, score: safeScore });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── POST /api/evaluate-submission/:participantId (admin re-trigger) ───────────
 
 app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, async (req, res) => {
   try {
     const participantId = String(req.params.participantId || '').trim();
-    if (!isUUID(participantId)) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
+    if (!(/^\d+$/.test(participantId) || isUUID(participantId))) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
 
     const { data: asgn, error: fetchErr } = await supabase
       .from('main_event_assignments')
@@ -1414,7 +1521,107 @@ async function getFizzBuzzSubmissions(req, res) {
 app.get('/api/admin/fizzbuzz/submissions',    requireAdmin, getFizzBuzzSubmissions);
 app.get('/api/admin/fizzbuzz/submissions-v2', requireAdmin, getFizzBuzzSubmissions);
 
-// ── POST /api/admin/fizzbuzz/score (+ /score-v2 alias) ───────────────────────
+// ── GET /api/admin/fizzbuzz/all-submissions ───────────────────────────────────
+// Returns fizzbuzz_submissions_v2 rows. Falls back to main_event_assignments
+// (Submitted rows) so View Submission / Run Code work without an active timer.
+app.get('/api/admin/fizzbuzz/all-submissions', requireAdmin, async (req, res) => {
+  try {
+    const { data: fzSubs, error: fzErr } = await supabase
+      .from('fizzbuzz_submissions_v2').select('*').order('submitted_at');
+    if (fzErr) return res.status(500).json({ success: false, message: fzErr.message });
+
+    if (fzSubs && fzSubs.length > 0)
+      return res.json({ success: true, submissions: fzSubs, source: 'fizzbuzz' });
+
+    // Fallback: one row per shuffled group from main_event_assignments
+    const { data: mea, error: meaErr } = await supabase
+      .from('main_event_assignments')
+      .select('participant_id, participant_name, shuffled_group, github_repo, submitted_at, submission_status')
+      .eq('submission_status', 'Submitted').order('submitted_at');
+    if (meaErr) return res.status(500).json({ success: false, message: meaErr.message });
+
+    const seen = new Set();
+    const fallback = [];
+    for (const row of (mea || [])) {
+      if (!row.shuffled_group || seen.has(row.shuffled_group)) continue;
+      seen.add(row.shuffled_group);
+      fallback.push({
+        shuffled_group: row.shuffled_group, submitted_by: row.participant_name,
+        participant_id: String(row.participant_id),
+        fizz_output: row.github_repo || '(no code)',
+        language: 'Unknown', submitted_at: row.submitted_at,
+        status: 'Submitted', is_correct: null, imposter_sabotaged: false, _test_mode: true
+      });
+    }
+    return res.json({ success: true, submissions: fallback, source: 'main_event_fallback' });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── POST /api/admin/fizzbuzz/run-code ─────────────────────────────────────────
+// Executes submitted FizzBuzz code via Piston API. Does NOT save scores.
+app.post('/api/admin/fizzbuzz/run-code', requireAdmin, async (req, res) => {
+  try {
+    const shuffled_group = String(req.body?.shuffled_group || '').trim();
+    const lang_override  = String(req.body?.language || '').trim();
+    if (!shuffled_group) return res.status(400).json({ success: false, message: 'shuffled_group is required.' });
+
+    let code = null, language = 'python', submittedBy = 'Unknown';
+
+    const { data: fzSub } = await supabase.from('fizzbuzz_submissions_v2')
+      .select('fizz_output, language, submitted_by').eq('shuffled_group', shuffled_group).maybeSingle();
+
+    if (fzSub && fzSub.fizz_output) {
+      code = fzSub.fizz_output; language = fzSub.language || 'python'; submittedBy = fzSub.submitted_by;
+    } else {
+      const { data: mea } = await supabase.from('main_event_assignments')
+        .select('participant_name, github_repo')
+        .eq('shuffled_group', shuffled_group).eq('submission_status', 'Submitted').limit(1).maybeSingle();
+      if (mea && mea.github_repo) {
+        return res.json({ success: true, shuffled_group, language: 'N/A', submitted_by: mea.participant_name,
+          stdout: '', stderr: '', exit_code: null, test_mode: true,
+          output: '⚠ Test Mode: GitHub repo URL submitted, not FizzBuzz code.\nURL: ' + mea.github_repo + '\nAsk participant to submit code via the FizzBuzz coding page.' });
+      }
+      return res.status(404).json({ success: false, message: 'No submission found for ' + shuffled_group });
+    }
+
+    if (lang_override) language = lang_override;
+
+    const langMap = {
+      python: { language: 'python', version: '3' }, python3: { language: 'python', version: '3' },
+      javascript: { language: 'javascript', version: '18' }, js: { language: 'javascript', version: '18' },
+      node: { language: 'javascript', version: '18' }, java: { language: 'java', version: '15' },
+      c: { language: 'c', version: '10' }, cpp: { language: 'c++', version: '10' },
+      'c++': { language: 'c++', version: '10' }, ruby: { language: 'ruby', version: '3' },
+      go: { language: 'go', version: '1' }, rust: { language: 'rust', version: '1' },
+      kotlin: { language: 'kotlin', version: '1' }, typescript: { language: 'typescript', version: '5' },
+      ts: { language: 'typescript', version: '5' }, csharp: { language: 'csharp', version: '6' },
+      'c#': { language: 'csharp', version: '6' }, php: { language: 'php', version: '8' },
+      swift: { language: 'swift', version: '5' }, r: { language: 'r', version: '4' },
+    };
+    const mapped = langMap[language.toLowerCase().trim()] || { language: language.toLowerCase(), version: '*' };
+
+    let pistonRes;
+    try {
+      pistonRes = await axios.post('https://emkc.org/api/v2/piston/execute', {
+        language: mapped.language, version: mapped.version,
+        files: [{ name: 'main', content: code }],
+        stdin: '', args: [], compile_timeout: 10000, run_timeout: 5000
+      }, { timeout: 15000, headers: { 'Content-Type': 'application/json' } });
+    } catch (axErr) {
+      return res.status(502).json({ success: false, message: 'Code execution service error: ' + (axErr.response?.data?.message || axErr.message) });
+    }
+
+    const run = pistonRes.data?.run || {}, compile = pistonRes.data?.compile || {};
+    const stdout = run.stdout || '', stderr = run.stderr || compile.stderr || '';
+    const output = (stdout + (stderr ? '\n--- stderr ---\n' + stderr : '')).trim();
+
+    return res.json({ success: true, shuffled_group, language, submitted_by: submittedBy,
+      stdout, stderr, output: output || '(no output)', exit_code: run.code ?? null });
+  } catch (err) {
+    console.error('[run-code]', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 async function applyFizzBuzzScore(req, res) {
   try {
