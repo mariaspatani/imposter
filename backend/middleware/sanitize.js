@@ -22,10 +22,13 @@ function escHtml(str) {
 /**
  * Validate a GitHub repository URL.
  * Returns true only for well-formed public github.com/owner/repo URLs.
+ * Explicitly rejects .git suffix (not a valid web URL; causes GitHub API 404).
  */
 function isValidGitHubUrl(value) {
   if (typeof value !== 'string') return false;
-  return /^https?:\/\/(www\.)?github\.com\/[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+\/?$/i.test(value.trim());
+  const v = value.trim();
+  if (/\.git\/?$/i.test(v)) return false;  // .git suffix is not a valid repo web URL
+  return /^https?:\/\/(www\.)?github\.com\/[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+\/?$/i.test(v);
 }
 
 /**
@@ -50,10 +53,11 @@ function isUUID(value) {
 
 /**
  * Clamp a number to [min, max], returning defaultValue if not a valid finite number.
+ * Uses Math.min/max first so Infinity/-Infinity resolve to the bounds rather than defaultValue.
  */
 function clampScore(value, min, max, defaultValue = 0) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return defaultValue;
+  if (isNaN(n)) return defaultValue;
   return Math.min(max, Math.max(min, n));
 }
 

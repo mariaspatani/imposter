@@ -1017,15 +1017,10 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Unable to create a valid seating arrangement after 500 attempts.' });
     }
 
-    // Step E: Write participant roles
-    for (const group of groups) {
-      for (const m of group.specialists) {
-        await supabase.from('participants').update({ is_imposter: false, shuffle_group: group.groupName, player_role: 'Specialist' }).eq('id', m.id);
-      }
-      await supabase.from('participants').update({ is_imposter: true, shuffle_group: group.groupName, player_role: 'Imposter' }).eq('id', group.imposter.id);
-    }
-
-    // Step F: Load tasks — hard-fail if not seeded (prevents fake data reaching participants)
+    // Step E (moved): Load and validate tasks BEFORE writing any DB state.
+    // If tasks are missing we must abort here — before touching the participants table —
+    // otherwise participants get shuffle_group written but no assignment rows created,
+    // causing login to succeed but /api/my-assignment to return 404.
     const { data: tasks, error: taskErr } = await supabase.from('main_event_tasks').select('*').order('task_number');
     if (taskErr) return res.status(500).json({ success: false, message: 'Failed to load tasks: ' + taskErr.message });
     if (!tasks || tasks.length < 3) {
@@ -1053,11 +1048,19 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       return { role_name: 'Unknown', work_description: 'TBA.' };
     };
 
-    // Validate all groups have tasks BEFORE writing any participant roles (Step E moved after this check)
+    // Validate all groups have tasks before touching any DB state.
     for (const group of groups) {
       if (!taskForGroup(group.groupName)) {
         return res.status(500).json({ success: false, message: `No task found for ${group.groupName}. Check task seeds.` });
       }
+    }
+
+    // Step F: Write participant roles — only reached after all validations pass.
+    for (const group of groups) {
+      for (const m of group.specialists) {
+        await supabase.from('participants').update({ is_imposter: false, shuffle_group: group.groupName, player_role: 'Specialist' }).eq('id', m.id);
+      }
+      await supabase.from('participants').update({ is_imposter: true, shuffle_group: group.groupName, player_role: 'Imposter' }).eq('id', group.imposter.id);
     }
 
     // Step G: Delete old assignments using an always-true condition; check error before proceeding

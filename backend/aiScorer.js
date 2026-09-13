@@ -115,8 +115,8 @@ async function downloadAndReadRepo(githubUrl) {
  * Returns { valid, owner, repo, defaultBranch, message? }
  */
 async function validateRepository(repoUrl) {
-  const clean = String(repoUrl || '').trim().replace(/\/$/, '');
-  const match = clean.match(/^https?:\/\/github\.com\/([A-Za-z0-9_.\-]+)\/([A-Za-z0-9_.\-]+)\/?$/i);
+  const clean = String(repoUrl || '').trim().replace(/\/$/, '').replace(/\.git$/i, '');
+  const match = clean.match(/^https?:\/\/github\.com\/([A-Za-z0-9_.\-]+)\/([A-Za-z0-9_.\-]+)$/i);
 
   if (!match) {
     return { valid: false, message: 'Invalid GitHub repository URL format.' };
