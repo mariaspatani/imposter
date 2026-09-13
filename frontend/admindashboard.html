@@ -547,8 +547,10 @@ function renderParticipants(){
     document.getElementById('participants-list').innerHTML = rows.map(p=>{
         const isSubmitted  = p.submission_status==='Submitted';
         const isEvaluated  = p.submission_status==='Evaluated';
+        const isEvaluating = p.submission_status==='Evaluating' || p.evaluation_status==='Evaluating';
+        const isFailed     = p.submission_status==='Failed' || p.evaluation_status==='Failed';
         const hasRepo      = !!p.github_repo;
-        const canUnlock    = isSubmitted || isEvaluated;
+        const canUnlock    = isSubmitted || isEvaluated || isFailed;
 
         return `<div class="bg-cardgray border border-bordergray rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div class="flex-1 min-w-0">
@@ -571,7 +573,8 @@ function renderParticipants(){
             <div class="flex items-center gap-2 flex-wrap">
                 ${hasRepo?`<a href="${e(p.github_repo)}" target="_blank" class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 hover:bg-cyan-600 hover:text-white transition-all">🔗 Repo</a>`:''}
                 ${canUnlock?`<button onclick="unlockSubmission('${e(p.participant_id)}',this)" class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600 hover:text-white transition-all">🔓 Unlock</button>`:''}
-                ${isSubmitted?`<button onclick="triggerEval('${e(p.participant_id)}','${e(p.participant_name)}',this)" class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-crimson-600/20 text-crimson-500 border border-crimson-600/30 hover:bg-crimson-600 hover:text-white transition-all">🤖 Evaluate</button>`:''}
+                ${hasRepo && !isEvaluating ? `<button onclick="triggerEval('${e(p.participant_id)}','${e(p.participant_name)}',this)" class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg ${isEvaluated ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-600/30 hover:bg-indigo-600' : isFailed ? 'bg-rose-600/20 text-rose-400 border border-rose-500/30 hover:bg-rose-600' : 'bg-crimson-600/20 text-crimson-500 border border-crimson-600/30 hover:bg-crimson-600'} hover:text-white transition-all">${isEvaluated ? '🔄 Re-evaluate' : isFailed ? '⚠️ Retry Eval' : '🤖 Evaluate'}</button>` : ''}
+                ${isEvaluating ? `<span class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-500/20 animate-pulse">⏳ Evaluating...</span>` : ''}
                 ${(isEvaluated&&p.ai_feedback)?`<button onclick='showFB("${e(p.participant_name)}",${JSON.stringify({ai_score:p.ai_score,ui_score:p.ui_score,task_match_score:p.task_match_score,logic_score:p.logic_score,creativity_score:p.creativity_score,code_quality_score:p.code_quality_score,ai_feedback:p.ai_feedback})})' class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-violet-600/20 text-violet-400 border border-violet-600/30 hover:bg-violet-600 hover:text-white transition-all">📋 Feedback</button>`:''}
             </div>
         </div>`;
@@ -594,13 +597,34 @@ async function triggerEval(pid,name,btn){
     btn.disabled=true; btn.innerText='Evaluating...'; btn.className=btn.className+' opacity-50';
     try{
         const r=await fetch(API+'/api/evaluate-submission/'+pid,{method:'POST',headers:authHeaders()});
+        if(r.status === 401){
+            document.getElementById('login-modal').style.display = 'flex';
+            alert('Admin session expired. Please log in.');
+            btn.disabled=false; btn.innerText='🤖 Evaluate';
+            return;
+        }
         const d=await r.json();
         if(r.ok&&d.success){
-            btn.innerText='✅ Queued';
-            btn.className='text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/20';
-            setTimeout(async()=>{ await fetchAll(); renderParticipants(); renderOverview(); }, 3000);
-        } else { btn.innerText='❌ '+(d.message||'Failed'); btn.disabled=false; }
-    }catch(ex){ btn.innerText='❌ Error'; btn.disabled=false; }
+            btn.innerText='⏳ Evaluating...';
+            btn.className='text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-500/20 animate-pulse';
+            
+            let polls = 0;
+            const pollInterval = setInterval(async () => {
+                polls++;
+                await fetchAll();
+                renderParticipants();
+                renderOverview();
+                const p = allParticipants.find(x => String(x.participant_id) === String(pid));
+                if (!p || p.evaluation_status !== 'Evaluating' || polls >= 10) {
+                    clearInterval(pollInterval);
+                }
+            }, 3000);
+        } else {
+            btn.innerText='❌ '+(d.message||'Failed');
+            btn.disabled=false;
+            alert(d.message || 'Evaluation request failed');
+        }
+    }catch(ex){ btn.innerText='❌ Error'; btn.disabled=false; alert('Network error: ' + ex.message); }
 }
 
 // ── Recover stuck evaluations (Vercel cold-start safety) ─────────────────────
