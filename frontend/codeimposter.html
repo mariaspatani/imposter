@@ -377,6 +377,12 @@
         updateTimer();
         timerInterval = setInterval(updateTimer, 1000);
 
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+
         // 3. Form Submission
         async function submitTask(event) {
             event.preventDefault();
@@ -422,23 +428,32 @@
                     statusMsg.style.display   = 'block';
                     statusMsg.style.borderColor = 'var(--green-glow)';
                     statusMsg.style.color       = 'var(--green-glow)';
-                    statusMsg.innerHTML = `
-                        ✓ SUBMISSION SUCCESSFUL!<br>
-                        Participant: <strong>${participantName}</strong><br>
-                        Final Time: <strong>${recordTime} (MM:SS)</strong>
-                    `;
+                    statusMsg.innerHTML =
+                        '&#10003; SUBMISSION SUCCESSFUL!<br>' +
+                        'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
+                        'Final Time: <strong>' + escHtml(recordTime) + ' (MM:SS)</strong>';
+                } else if (res.status === 409 && data && data.already_submitted) {
+                    // Already submitted — show the existing time
+                    submitBtn.textContent     = 'ALREADY SUBMITTED';
+                    statusMsg.style.display   = 'block';
+                    statusMsg.style.borderColor = 'var(--green-glow)';
+                    statusMsg.style.color       = 'var(--green-glow)';
+                    statusMsg.innerHTML =
+                        '&#10003; Already submitted.<br>' +
+                        'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
+                        'Recorded Time: <strong>' + escHtml(data.completion_time || recordTime) + '</strong>';
                 } else {
                     // Server rejected — still lock UI (time is recorded) but show warning
                     submitBtn.textContent     = 'SUBMITTED';
                     statusMsg.style.display   = 'block';
                     statusMsg.style.borderColor = '#ff8c00';
                     statusMsg.style.color       = '#ff8c00';
-                    statusMsg.innerHTML = `
-                        ⚠ Time recorded locally.<br>
-                        Participant: <strong>${participantName}</strong><br>
-                        Final Time: <strong>${recordTime}</strong><br>
-                        <small>${data && data.message ? data.message : 'Server could not save — inform coordinator.'}</small>
-                    `;
+                    const serverMsg = (data && data.message) ? escHtml(data.message) : 'Server could not save — inform coordinator.';
+                    statusMsg.innerHTML =
+                        '&#9888; Time recorded locally.<br>' +
+                        'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
+                        'Final Time: <strong>' + escHtml(recordTime) + '</strong><br>' +
+                        '<small>' + serverMsg + '</small>';
                 }
             } catch (err) {
                 // Network error — still freeze/lock but warn
@@ -452,12 +467,11 @@
                 statusMsg.style.display     = 'block';
                 statusMsg.style.borderColor = '#ff8c00';
                 statusMsg.style.color       = '#ff8c00';
-                statusMsg.innerHTML = `
-                    ⚠ Time recorded locally (server unreachable).<br>
-                    Participant: <strong>${participantName}</strong><br>
-                    Final Time: <strong>${recordTime}</strong><br>
-                    <small>Inform the coordinator to record this manually.</small>
-                `;
+                statusMsg.innerHTML =
+                    '&#9888; Time recorded locally (server unreachable).<br>' +
+                    'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
+                    'Final Time: <strong>' + escHtml(recordTime) + '</strong><br>' +
+                    '<small>Inform the coordinator to record this manually.</small>';
             }
         }
     </script>

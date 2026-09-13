@@ -621,6 +621,8 @@
             ? 'http://localhost:3000'
             : '';
 
+        function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
         // ── Admin auth ──────────────────────────────────────────────────────────
         let ADMIN_TOKEN = sessionStorage.getItem('admin_token') || '';
 
@@ -1076,14 +1078,15 @@
                 const data = await response.json();
                 if (response.ok && data && data.success === true) {
                     responseBox.className = 'response-box success';
-                    responseBox.innerHTML = `Team registered successfully.<br><strong>Team Code:</strong> ${data.team_code}<br>Participants can now authenticate from the homepage using the exact team and participant names.`;
+                    responseBox.textContent = '';
+                    responseBox.innerHTML = 'Team registered successfully.<br><strong>Team Code: ' + esc(data.team_code || '') + '</strong><br>Participants can now authenticate from the homepage using the exact team and participant names.';
                     responseBox.style.display = 'block';
                     form.reset();
                     await loadRegisteredTeams();
                     return;
                 }
                 responseBox.className = 'response-box error';
-                responseBox.innerHTML = data && data.message ? data.message : 'Team registration failed.';
+                responseBox.textContent = data && data.message ? data.message : 'Team registration failed.';
                 responseBox.style.display = 'block';
             } catch (error) {
                 responseBox.className = 'response-box error';

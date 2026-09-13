@@ -127,6 +127,7 @@
                     <select id="f-group" onchange="renderParticipants()" class="text-xs font-orbitron bg-cardgray border border-bordergray rounded-lg px-3 py-1.5 text-gray-300 focus:outline-none focus:border-crimson-500">
                         <option value="all">All Groups</option>
                     </select>
+                    <button onclick="recoverEvaluations(this)" class="text-xs font-orbitron px-3 py-1.5 rounded-lg bg-orange-600/20 text-orange-400 border border-orange-500/30 hover:bg-orange-600 hover:text-white transition-all" title="Recover any stuck or unstarted AI evaluations">⚡ Recover Evaluations</button>
                 </div>
             </div>
             <div id="participants-list" class="space-y-2"></div>
@@ -586,9 +587,27 @@ async function triggerEval(pid,name,btn){
         const r=await fetch(API+'/api/evaluate-submission/'+pid,{method:'POST',headers:authHeaders()});
         const d=await r.json();
         if(r.ok&&d.success){
-            btn.innerText='✅ '+d.score+'/100';
+            btn.innerText='✅ Queued';
             btn.className='text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/20';
-            await fetchAll(); renderParticipants(); renderOverview();
+            setTimeout(async()=>{ await fetchAll(); renderParticipants(); renderOverview(); }, 3000);
+        } else { btn.innerText='❌ '+(d.message||'Failed'); btn.disabled=false; }
+    }catch(ex){ btn.innerText='❌ Error'; btn.disabled=false; }
+}
+
+// ── Recover stuck evaluations (Vercel cold-start safety) ─────────────────────
+async function recoverEvaluations(btn){
+    btn.disabled=true; btn.innerText='Scanning...';
+    try{
+        const r=await fetch(API+'/api/admin/recover-evaluations',{method:'POST',headers:authHeaders()});
+        const d=await r.json();
+        if(r.ok&&d.success){
+            if(d.recovered===0){
+                btn.innerText='✅ All Clear';
+            } else {
+                btn.innerText='⚡ Recovering '+d.recovered+'...';
+                setTimeout(async()=>{ await fetchAll(); renderParticipants(); renderOverview(); }, 5000);
+            }
+            setTimeout(()=>{ btn.disabled=false; btn.innerText='⚡ Recover Evaluations'; },8000);
         } else { btn.innerText='❌ '+(d.message||'Failed'); btn.disabled=false; }
     }catch(ex){ btn.innerText='❌ Error'; btn.disabled=false; }
 }
@@ -961,11 +980,13 @@ function renderFlow(){
 
 // ── Feedback modal ─────────────────────────────────────────────────────────────
 function showFB(name,data){
-    document.getElementById('fb-name').innerText=name+' — AI Score: '+(data.ai_score||'--')+'/100';
+    document.getElementById('fb-name').innerText=name+' — AI Score: '+(data.ai_score!=null?data.ai_score:'--')+'/100';
     const breakdowns=[
-        {l:'UI Design',v:data.ui_score,m:20},{l:'Task Match',v:data.task_match_score,m:30},
-        {l:'Logic',v:data.logic_score,m:25},{l:'Creativity',v:data.creativity_score,m:15},
-        {l:'Code Quality',v:data.code_quality_score,m:10}
+        {l:'Task Completion',v:data.task_match_score,m:40},
+        {l:'UI / UX',v:data.ui_score,m:20},
+        {l:'Logic & Code',v:data.logic_score,m:20},
+        {l:'Responsiveness',v:data.code_quality_score,m:10},
+        {l:'Creativity',v:data.creativity_score,m:10}
     ];
     document.getElementById('fb-scores').innerHTML=breakdowns.map(b=>
         `<div class="bg-black/40 border border-bordergray rounded-xl p-2">

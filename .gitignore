@@ -1,5 +1,65 @@
+# -- Dependencies -------------------------------------------------------------
 backend/node_modules/
+node_modules/
+
+# -- Environment / secrets ----------------------------------------------------
 backend/.env
+.env
+.env.local
+.env.*.local
+
+# -- Logs ---------------------------------------------------------------------
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -- OS artefacts -------------------------------------------------------------
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# -- VS Code -------------------------------------------------------------------
+.vscode/
+*.code-workspace
+
+# -- JetBrains IDEs (IntelliJ, WebStorm, PyCharm, etc.) ---------------------
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.idea_modules/
+
+# -- Vim / Neovim -------------------------------------------------------------
+*.swp
+*.swo
+*~
+.netrwhist
+
+# -- Emacs --------------------------------------------------------------------
+.#*
+
+# -- Sublime Text -------------------------------------------------------------
+*.sublime-workspace
+*.sublime-project
+
+# -- Cursor / Bob / Kiro ------------------------------------------------------
+.cursor/
+.bob/
+.kiro/
+
+# -- Build outputs -------------------------------------------------------------
+dist/
+build/
+.cache/
+
+# -- Misc ---------------------------------------------------------------------
+*.pid
+*.seed
+*.pid.lock

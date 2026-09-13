@@ -182,9 +182,10 @@ CREATE TABLE IF NOT EXISTS main_event_assignments (
     created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_mea_participant_id   ON main_event_assignments (participant_id);
-CREATE INDEX IF NOT EXISTS idx_mea_shuffled_group   ON main_event_assignments (shuffled_group);
+CREATE INDEX IF NOT EXISTS idx_mea_participant_id    ON main_event_assignments (participant_id);
+CREATE INDEX IF NOT EXISTS idx_mea_shuffled_group    ON main_event_assignments (shuffled_group);
 CREATE INDEX IF NOT EXISTS idx_mea_submission_status ON main_event_assignments (submission_status);
+CREATE INDEX IF NOT EXISTS idx_mea_evaluation_status ON main_event_assignments (evaluation_status);
 
 -- ── 6. shuffle_lock ───────────────────────────────────────────────────────────
 -- Prevents accidental re-shuffle after event starts.

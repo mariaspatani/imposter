@@ -80,11 +80,12 @@ function computeRemaining(t) {
 
   if (t.status === 'running' && t.started_at) {
     const runningFor = Math.floor((Date.now() - new Date(t.started_at).getTime()) / 1000);
+    // If remaining_seconds is 0 or null (e.g. fresh start before first tick), fall back to full duration.
     const stored     = (t.remaining_seconds != null && t.remaining_seconds > 0) ? t.remaining_seconds : fullSecs;
     return Math.max(0, stored - runningFor);
   }
 
-  // idle / paused / waiting / stopped / any other state
+  // idle / paused / waiting / stopped / any other state — return the snapshotted value
   if (t.remaining_seconds != null && t.remaining_seconds > 0) return t.remaining_seconds;
   return fullSecs;
 }
@@ -285,8 +286,9 @@ app.post('/api/submit-github', submitLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: validation.message });
     }
 
-    // Mark as Submitted immediately so duplicate submissions are blocked
-    const { error: updateErr } = await supabase
+    // Atomic conditional update: only succeeds if submission_locked is still FALSE.
+    // This prevents duplicate submissions even under concurrent requests.
+    const { data: updated, error: updateErr } = await supabase
       .from('main_event_assignments')
       .update({
         github_repo,
@@ -298,9 +300,19 @@ app.post('/api/submit-github', submitLimiter, async (req, res) => {
         submission_locked: true,
         submitted_at:      new Date().toISOString()
       })
-      .eq('participant_id', participant_id);
+      .eq('participant_id', participant_id)
+      .eq('submission_locked', false)
+      .select('participant_id');
 
     if (updateErr) return res.status(500).json({ success: false, message: 'Failed to save submission.' });
+
+    // If nothing was updated, a concurrent request already locked the submission
+    if (!updated || updated.length === 0) {
+      return res.status(409).json({
+        success:  false,
+        message:  'You have already submitted. Only one submission is allowed.'
+      });
+    }
 
     // Respond immediately — AI evaluation runs in background
     res.json({
@@ -459,15 +471,23 @@ app.post('/api/fizzbuzz/submit-v2', submitLimiter, async (req, res) => {
 
     if (!assignment) return res.status(404).json({ success: false, message: 'Assignment not found.' });
 
-    // Check timer
+    // Check timer — block if missing, finished, or expired
     const { data: timer } = await supabase
       .from('event_timers')
-      .select('status')
+      .select('*')
       .eq('event_key', 'fizzbuzz')
       .maybeSingle();
 
-    if (timer && timer.status === 'finished') {
+    if (!timer) {
+      return res.status(403).json({ success: false, message: 'FizzBuzz round is not currently open.' });
+    }
+
+    const fbRemaining = computeRemaining(timer);
+    if (timer.status === 'finished' || (timer.status === 'running' && fbRemaining <= 0)) {
       return res.status(403).json({ success: false, message: 'FizzBuzz round has ended. No more submissions.' });
+    }
+    if (timer.status !== 'running') {
+      return res.status(403).json({ success: false, message: 'FizzBuzz round is not currently open.' });
     }
 
     // Check if group already submitted
@@ -495,7 +515,14 @@ app.post('/api/fizzbuzz/submit-v2', submitLimiter, async (req, res) => {
       imposter_sabotaged: imposterSabotaged
     });
 
-    if (insErr) return res.status(500).json({ success: false, message: insErr.message });
+    // Primary-key duplicate (concurrent submission from same group) — return 409, not 500
+    if (insErr) {
+      const isDupe = insErr.code === '23505' || (insErr.message || '').includes('duplicate');
+      if (isDupe) {
+        return res.status(409).json({ success: false, message: 'Another member of your group already submitted.' });
+      }
+      return res.status(500).json({ success: false, message: 'Submission failed. Please try again.' });
+    }
 
     // Lock all 4 members of the group
     await supabase.from('main_event_assignments')
@@ -562,6 +589,8 @@ app.post('/api/code-imposter/submit', submitLimiter, async (req, res) => {
       }
     } else {
       // Fallback: look up by name (best-effort for coordinator-run events)
+      // Log a warning so coordinators can identify missing participant_id cases.
+      console.warn('[code-imposter] participant_id missing, falling back to name lookup for:', participant_name);
       const { data: asgn } = await supabase
         .from('main_event_assignments')
         .select('participant_id, original_team')
@@ -573,6 +602,23 @@ app.post('/api/code-imposter/submit', submitLimiter, async (req, res) => {
       }
     }
 
+    // Idempotency: if participant already submitted, return their existing record (no duplicate)
+    if (participant_id) {
+      const { data: existing } = await supabase
+        .from('code_imposter_submissions')
+        .select('id, elapsed_time, submitted_at')
+        .eq('participant_id', participant_id)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        return res.status(409).json({
+          success:         false,
+          already_submitted: true,
+          message:         'You have already submitted your Code Imposter time.',
+          completion_time: existing[0].elapsed_time
+        });
+      }
+    }
+
     const { error } = await supabase.from('code_imposter_submissions').insert({
       participant_id:   participant_id || null,
       participant_name,
@@ -581,7 +627,7 @@ app.post('/api/code-imposter/submit', submitLimiter, async (req, res) => {
       submitted_at:     new Date().toISOString()
     });
 
-    if (error) return res.status(500).json({ success: false, message: error.message });
+    if (error) return res.status(500).json({ success: false, message: 'Submission failed. Please try again.' });
 
     return res.json({ success: true, message: 'Submission recorded.', completion_time: completion_time_raw });
   } catch (err) {
@@ -933,15 +979,24 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       return { role_name: 'Unknown', work_description: 'TBA.' };
     };
 
-    // Validate all groups have tasks
+    // Validate all groups have tasks BEFORE writing any participant roles (Step E moved after this check)
     for (const group of groups) {
       if (!taskForGroup(group.groupName)) {
         return res.status(500).json({ success: false, message: `No task found for ${group.groupName}. Check task seeds.` });
       }
     }
 
-    // Step G: Delete old assignments (only after we know we have valid task data)
-    await supabase.from('main_event_assignments').delete().gte('created_at', '1970-01-01T00:00:00.000Z').catch(() => {});
+    // Step G: Delete old assignments using an always-true condition; check error before proceeding
+    const { error: delErr } = await supabase
+      .from('main_event_assignments')
+      .delete()
+      .not('participant_id', 'is', null);
+    if (delErr) return res.status(500).json({ success: false, message: 'Failed to clear old assignments: ' + delErr.message });
+
+    // If force_reset: also wipe FizzBuzz submissions so the full event state is clean
+    if (forceReset) {
+      await supabase.from('fizzbuzz_submissions_v2').delete().not('shuffled_group', 'is', null).catch(() => {});
+    }
 
     // Step H: Build 24 assignment rows
     // person4_secret is stored separately — it is ONLY delivered to the imposter via /api/my-assignment
@@ -1101,6 +1156,9 @@ app.post('/api/admin/unlock-submission', requireAdmin, async (req, res) => {
     const participant_id = String(req.body?.participant_id || '').trim();
     if (!isUUID(participant_id)) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
 
+    // Intentional dual-reset: both submission_status AND evaluation_status are cleared to 'Pending'
+    // so the participant can resubmit from scratch. All AI score fields are nulled atomically.
+    // submission_locked is set to false so the atomic submission guard allows a new submission.
     const { error } = await supabase.from('main_event_assignments').update({
       github_repo: null, github_owner: null, github_repo_name: null, github_branch: null,
       submitted_at: null, submission_status: 'Pending', evaluation_status: 'Pending',
@@ -1157,7 +1215,7 @@ app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, a
 
     const { data: asgn, error: fetchErr } = await supabase
       .from('main_event_assignments')
-      .select('participant_id, participant_name, github_repo, submission_status, task_title, task_description, role_name, work_description, is_imposter')
+      .select('participant_id, participant_name, github_repo, submission_status, evaluation_status, task_title, task_description, role_name, work_description, is_imposter')
       .eq('participant_id', participantId)
       .maybeSingle();
 
@@ -1165,8 +1223,22 @@ app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, a
     if (!asgn)    return res.status(404).json({ success: false, message: 'Assignment not found.' });
     if (!asgn.github_repo) return res.status(400).json({ success: false, message: 'No GitHub repository has been submitted yet.' });
 
+    // Only start if not already actively evaluating (prevents duplicate parallel jobs on rapid double-click)
+    if (asgn.submission_status === 'Evaluating' || asgn.evaluation_status === 'Evaluating') {
+      return res.status(409).json({ success: false, message: 'Evaluation is already in progress for ' + asgn.participant_name + '. Please wait.' });
+    }
+
     // Mark as evaluating and respond immediately
-    await supabase.from('main_event_assignments').update({ evaluation_status: 'Evaluating' }).eq('participant_id', participantId);
+    const { data: guardUpdate } = await supabase
+      .from('main_event_assignments')
+      .update({ evaluation_status: 'Evaluating' })
+      .eq('participant_id', participantId)
+      .neq('evaluation_status', 'Evaluating')
+      .select('participant_id');
+
+    if (!guardUpdate || guardUpdate.length === 0) {
+      return res.status(409).json({ success: false, message: 'Evaluation is already in progress. Please wait.' });
+    }
 
     res.json({ success: true, message: 'Re-evaluation started for ' + asgn.participant_name });
 
@@ -1287,6 +1359,10 @@ app.post('/api/admin/fizzbuzz/toggle', requireAdmin, async (req, res) => {
 
     const fullSecs = (t.duration_minutes || 15) * 60;
     if (action === 'on') {
+      // Guard: do not reset an already-running timer
+      if (t.status === 'running') {
+        return res.status(409).json({ success: false, message: 'FizzBuzz round is already running.' });
+      }
       await supabase.from('event_timers').update({ status: 'running', started_at: new Date().toISOString(), paused_at: null, remaining_seconds: fullSecs }).eq('event_key', 'fizzbuzz');
       auditLog('fizzbuzz_toggle', 'fizzbuzz', { action: 'on' });
       return res.json({ success: true, fizzbuzz_open: true, status: 'running', remaining_seconds: fullSecs });
@@ -1322,14 +1398,15 @@ async function timerAction(eventKey, action, extraPayload = {}) {
     update = { status: 'running', started_at: new Date().toISOString(), paused_at: null, remaining_seconds: fullSecs };
   } else if (action === 'pause') {
     if (t.status !== 'running') return { ok: false, message: 'Timer is not running.' };
-    // computeRemaining already accounts for elapsed since started_at — use it directly
+    // Snapshot remaining_seconds at pause time so resume can correctly subtract elapsed from this value.
+    // computeRemaining already accounts for elapsed since started_at — use it directly.
     const remaining = computeRemaining(t);
     update = { status: 'paused', paused_at: new Date().toISOString(), started_at: null, remaining_seconds: remaining };
   } else if (action === 'resume') {
     if (t.status !== 'paused') return { ok: false, message: 'Timer is not paused.' };
-    // Resume from saved remaining_seconds — do not restart from fullSecs
+    // Resume from saved remaining_seconds snapshot — do NOT modify remaining_seconds here.
+    // computeRemaining(t) will correctly return: remaining_seconds - (now - started_at).
     update = { status: 'running', started_at: new Date().toISOString(), paused_at: null };
-    // remaining_seconds stays as-is in DB; computeRemaining(t) will recalculate from new started_at
   } else if (action === 'reset') {
     update = { status: 'idle', started_at: null, paused_at: null, remaining_seconds: fullSecs };
   } else if (action === 'finish') {
@@ -1338,7 +1415,8 @@ async function timerAction(eventKey, action, extraPayload = {}) {
     const rs = Number(extraPayload.remaining_seconds);
     if (!Number.isFinite(rs)) return { ok: false, message: 'remaining_seconds required.' };
     if (t.status !== 'running') return { ok: true, message: 'Timer not running — tick ignored.' };
-    update = { remaining_seconds: Math.max(0, rs) };
+    // Also reset started_at to now so elapsed-time arithmetic stays consistent with the ticked value.
+    update = { remaining_seconds: Math.max(0, rs), started_at: new Date().toISOString() };
   }
 
   const { error: updErr } = await supabase.from('event_timers').update({ ...update, updated_at: new Date().toISOString() }).eq('event_key', eventKey);
@@ -1407,11 +1485,82 @@ app.post('/api/admin/update-main-event-score', requireAdmin, async (req, res) =>
     const participant_id   = String(req.body?.participant_id || '').trim();
     const main_event_score = clampScore(req.body?.score, 0, 100);
     if (!isUUID(participant_id)) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
-    const { error } = await supabase.from('main_event_assignments').update({ main_event_score }).eq('participant_id', participant_id);
+
+    // Fetch current fizzbuzz_score and imposter_bonus to recompute total_individual_score atomically
+    const { data: current, error: fetchErr } = await supabase
+      .from('main_event_assignments')
+      .select('fizzbuzz_score, imposter_bonus')
+      .eq('participant_id', participant_id)
+      .maybeSingle();
+    if (fetchErr) return res.status(500).json({ success: false, message: fetchErr.message });
+
+    const fizzbuzz_score = Number(current?.fizzbuzz_score || 0);
+    const imposter_bonus = Number(current?.imposter_bonus || 0);
+    const total_individual_score = main_event_score + fizzbuzz_score + imposter_bonus;
+
+    const { error } = await supabase.from('main_event_assignments').update({
+      main_event_score,
+      total_individual_score
+    }).eq('participant_id', participant_id);
     if (error) return res.status(500).json({ success: false, message: error.message });
     auditLog('update_main_score', participant_id, { score: main_event_score });
     return res.json({ success: true });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── POST /api/admin/recover-evaluations ──────────────────────────────────────
+// Finds all submissions stuck in 'Queued' or 'Evaluating' (for >5 minutes)
+// and re-runs their AI evaluation. Use this after a Vercel cold-start/timeout.
+
+app.post('/api/admin/recover-evaluations', requireAdmin, async (req, res) => {
+  try {
+    // Queued: evaluation never started
+    // Evaluating + old: evaluation started but runtime was terminated (Vercel)
+    const { data: stuck, error } = await supabase
+      .from('main_event_assignments')
+      .select('participant_id, participant_name, github_repo, task_title, task_description, role_name, work_description, is_imposter, evaluation_status, submitted_at')
+      .in('evaluation_status', ['Queued', 'Evaluating'])
+      .not('github_repo', 'is', null);
+
+    if (error) return res.status(500).json({ success: false, message: error.message });
+
+    const candidates = (stuck || []).filter(r => {
+      if (r.evaluation_status === 'Queued') return true;
+      // Only recover 'Evaluating' rows that are older than 5 minutes (truly stuck)
+      if (r.evaluation_status === 'Evaluating' && r.submitted_at) {
+        return new Date(r.submitted_at).getTime() < Date.now() - 5 * 60 * 1000;
+      }
+      return false;
+    });
+
+    if (candidates.length === 0) {
+      return res.json({ success: true, message: 'No stuck evaluations found.', recovered: 0 });
+    }
+
+    // Respond immediately with count, then run evaluations in background
+    res.json({
+      success:   true,
+      message:   `Recovering ${candidates.length} stuck evaluation(s). Check the participants tab for progress.`,
+      recovered: candidates.length,
+      participants: candidates.map(c => c.participant_name)
+    });
+
+    // Fire evaluations after response (admin-triggered, coordinator is watching)
+    for (const row of candidates) {
+      runEvaluation(row.participant_id, {
+        github_repo:      row.github_repo,
+        task_title:       row.task_title,
+        task_description: row.task_description,
+        role_name:        row.role_name,
+        work_description: row.work_description,
+        is_imposter:      row.is_imposter
+      }).catch(err => console.error('[recover-eval]', row.participant_id, err.message));
+    }
+
+    auditLog('recover_evaluations', 'system', { count: candidates.length });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // ── Catch-all for unknown routes ──────────────────────────────────────────────
@@ -1427,12 +1576,16 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ success: false, message: 'Internal server error.' });
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
+// ── Start (local dev only — Vercel uses module.exports = app) ─────────────────
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`[ASTHRA Imposter] Server running on port ${PORT}`);
-  console.log(`[ASTHRA Imposter] Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
-});
+// Only bind the HTTP port when running locally (not in Vercel serverless).
+// In Vercel, process.env.VERCEL is set to '1' at runtime.
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`[ASTHRA Imposter] Server running on port ${PORT}`);
+    console.log(`[ASTHRA Imposter] Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  });
+}
 
 module.exports = app; // needed for Vercel serverless
