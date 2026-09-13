@@ -3,6 +3,7 @@
 const express   = require('express');
 const cors      = require('cors');
 const crypto    = require('crypto');
+const path      = require('path');
 require('dotenv').config();
 
 const { createClient }    = require('@supabase/supabase-js');
@@ -64,16 +65,39 @@ setImmediate(() => {
 
 const app = express();
 
-// CORS: allow only trusted origins
-const ALLOWED_ORIGINS = (process.env.FRONTEND_ORIGIN || 'http://localhost:8080')
+// CORS — allowed origins
+// In production set FRONTEND_ORIGIN to your deployed URL.
+// In local dev every common port is allowed automatically so Live Server,
+// Vite, or any other static server works without touching .env.
+const ALLOWED_ORIGINS = (process.env.FRONTEND_ORIGIN || '')
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
 
+// Local dev origins always permitted (ignored in production if FRONTEND_ORIGIN is set)
+const LOCAL_DEV_ORIGINS = [
+  'http://localhost:3000',
+  'http://localhost:5500',
+  'http://localhost:5173',
+  'http://localhost:8080',
+  'http://localhost:8000',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5500',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:8080',
+  'http://127.0.0.1:8000',
+];
+
 app.use(cors({
   origin(origin, cb) {
-    // Allow same-origin (no origin header) and explicitly listed origins
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    // Same-origin requests (no Origin header — e.g. direct file:// or server-side)
+    if (!origin) return cb(null, true);
+    // Explicitly listed production origins
+    if (ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    // Always allow local dev origins
+    if (LOCAL_DEV_ORIGINS.includes(origin)) return cb(null, true);
+    // If no FRONTEND_ORIGIN env var is set we are in local/dev mode — allow all
+    if (!process.env.FRONTEND_ORIGIN) return cb(null, true);
     return cb(new Error('CORS: origin not allowed: ' + origin));
   },
   methods:     ['GET', 'POST', 'OPTIONS'],
@@ -1612,6 +1636,39 @@ app.post('/api/admin/recover-evaluations', requireAdmin, async (req, res) => {
 });
 
 // ── Catch-all for unknown routes ──────────────────────────────────────────────
+
+// ── Static frontend (local dev only) ─────────────────────────────────────────
+// Serves the frontend/ folder at clean URLs so the same setup works in the
+// browser without a separate static server:
+//   http://localhost:3000/          → homepage
+//   http://localhost:3000/admin     → admin dashboard
+//   http://localhost:3000/coordinator → team registration
+//   http://localhost:3000/fizzbuzz  → fizzbuzz rules page
+//   http://localhost:3000/game      → main event page
+//   http://localhost:3000/fizzbuzz-coding → fizzbuzz coding page
+//   http://localhost:3000/code-imposter   → code imposter page
+// On Vercel, static files are served by @vercel/static via vercel.json.
+if (!process.env.VERCEL) {
+  const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
+
+  // Named clean-URL routes (must come before the catch-all static middleware)
+  const PAGE_MAP = {
+    '/':                  'homepage.html',
+    '/admin':             'admindashboard.html',
+    '/coordinator':       'team_registration.html',
+    '/fizzbuzz':          'fizzbuzz.html',
+    '/fizzbuzz-coding':   'fizzbuzz_coding.html',
+    '/game':              'main_event_page.html',
+    '/code-imposter':     'codeimposter.html',
+  };
+
+  Object.entries(PAGE_MAP).forEach(([route, file]) => {
+    app.get(route, (_req, res) => res.sendFile(path.join(FRONTEND_DIR, file)));
+  });
+
+  // Also serve raw .html filenames and any other static assets (CSS, JS, images)
+  app.use(express.static(FRONTEND_DIR));
+}
 
 app.use((req, res) => {
   res.status(404).json({ success: false, message: `Route not found: ${req.method} ${req.path}` });
