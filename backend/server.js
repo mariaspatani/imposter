@@ -434,10 +434,12 @@ async function runEvaluation(participantId, assignmentData) {
     console.error('[eval] Failed for', participantId, ':', evalErr.message);
 
     // Preserve submission — only mark evaluation as failed
-    await supabase.from('main_event_assignments').update({
-      evaluation_status: 'Failed',
-      ai_feedback:       'Evaluation failed: ' + evalErr.message.slice(0, 200)
-    }).eq('participant_id', participantId).catch(() => {});
+    try {
+      await supabase.from('main_event_assignments').update({
+        evaluation_status: 'Failed',
+        ai_feedback:       'Evaluation failed: ' + evalErr.message.slice(0, 200)
+      }).eq('participant_id', participantId);
+    } catch (_) {}
   }
 }
 
@@ -836,7 +838,7 @@ app.post('/api/register-team', registerLimiter, requireAdmin, async (req, res) =
 
     if (pErr) {
       // Roll back team creation
-      await supabase.from('teams').delete().eq('id', teamId).catch(() => {});
+      try { await supabase.from('teams').delete().eq('id', teamId); } catch (_) {}
       return res.status(500).json({ success: false, message: pErr.message });
     }
 
@@ -1067,7 +1069,7 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
 
     // If force_reset: also wipe FizzBuzz submissions so the full event state is clean
     if (forceReset) {
-      await supabase.from('fizzbuzz_submissions_v2').delete().not('shuffled_group', 'is', null).catch(() => {});
+      try { await supabase.from('fizzbuzz_submissions_v2').delete().not('shuffled_group', 'is', null); } catch (_) {}
     }
 
     // Step H: Build 24 assignment rows
