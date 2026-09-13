@@ -26,6 +26,40 @@ if (!process.env.ADMIN_SECRET) {
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+// ── Startup table check (non-blocking, logs missing tables) ──────────────────
+// Runs after the first event-loop tick so the server is ready to handle /api/health
+// even if Supabase is slow.
+const REQUIRED_TABLES = [
+  'teams', 'participants', 'main_event_tasks', 'main_event_assignments',
+  'event_timers', 'shuffle_lock', 'fizzbuzz_submissions_v2',
+  'code_imposter_submissions', 'manual_event_scores_v2',
+  'admin_sessions', 'audit_log'
+];
+
+async function checkRequiredTables() {
+  const missing = [];
+  for (const t of REQUIRED_TABLES) {
+    const { error } = await supabase.from(t).select('*').limit(0);
+    if (error && (error.message.includes('does not exist') || error.message.includes('schema cache'))) {
+      missing.push(t);
+    }
+  }
+  if (missing.length > 0) {
+    console.error('[DB] ⚠ MISSING TABLES:', missing.join(', '));
+    console.error('[DB] Run backend/migrations/002_missing_tables.sql in Supabase SQL Editor to create them.');
+    console.error('[DB] Admin login will fail until admin_sessions is created.');
+  } else {
+    console.log('[DB] All required tables exist ✓');
+  }
+  return missing;
+}
+
+// Store result for /api/health to use (populated asynchronously)
+let _missingTables = null;
+setImmediate(() => {
+  checkRequiredTables().then(missing => { _missingTables = missing; }).catch(() => {});
+});
+
 // ── Express app ───────────────────────────────────────────────────────────────
 
 const app = express();
@@ -124,11 +158,16 @@ function resolveEventKey(input) {
 app.get('/api/health', async (req, res) => {
   try {
     const { error } = await supabase.from('teams').select('count').limit(1);
+    const missing = _missingTables; // may be null if startup check is still running
     return res.json({
-      success:   true,
-      status:    'ok',
-      database:  error ? 'unavailable' : 'ok',
-      timestamp: new Date().toISOString()
+      success:         true,
+      status:          error ? 'degraded' : 'ok',
+      database:        error ? 'unavailable' : 'ok',
+      missing_tables:  missing && missing.length > 0 ? missing : undefined,
+      setup_required:  missing && missing.length > 0
+        ? 'Run backend/migrations/002_missing_tables.sql in Supabase SQL Editor'
+        : undefined,
+      timestamp:       new Date().toISOString()
     });
   } catch (err) {
     return res.status(500).json({ success: false, status: 'error', database: 'unavailable' });
@@ -702,7 +741,16 @@ app.post('/api/admin/login', adminLimiter, async (req, res) => {
 
     const token = crypto.randomBytes(32).toString('hex');
     const { error } = await supabase.from('admin_sessions').insert({ token });
-    if (error) return res.status(500).json({ success: false, message: 'Failed to create session.' });
+    if (error) {
+      // Distinguish a missing table from other DB errors
+      const isMissingTable = error.message.includes('does not exist') || error.message.includes('schema cache');
+      return res.status(500).json({
+        success: false,
+        message: isMissingTable
+          ? 'Database setup incomplete: admin_sessions table is missing. Run backend/migrations/002_missing_tables.sql in Supabase SQL Editor, then try again.'
+          : 'Failed to create session. Please try again.'
+      });
+    }
 
     auditLog('admin_login', 'admin', {});
     return res.json({ success: true, token });
