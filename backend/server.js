@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const express   = require('express');
 const cors      = require('cors');
@@ -904,12 +904,12 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       .eq('id', 1)
       .maybeSingle();
 
-    if (lockRow?.is_locked && !forceReset) {
+    if (lockRow?.is_locked) {
       return res.status(409).json({
         success:   false,
         locked:    true,
         locked_at: lockRow.locked_at,
-        message:   'Shuffle has already been run and is locked. Pass force_reset:true to override (this will wipe all existing submissions and scores).'
+        message:   'Shuffle is locked. Unlock shuffle first on the Coordinator Dashboard before running or retrying.'
       });
     }
 
@@ -1039,10 +1039,9 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       .not('participant_id', 'is', null);
     if (delErr) return res.status(500).json({ success: false, message: 'Failed to clear old assignments: ' + delErr.message });
 
-    // If force_reset: also wipe FizzBuzz submissions so the full event state is clean
-    if (forceReset) {
-      try { await supabase.from('fizzbuzz_submissions_v2').delete().not('shuffled_group', 'is', null); } catch (_) {}
-    }
+    // Always wipe FizzBuzz submissions too — every shuffle reassigns groups so the
+    // existing per-group submissions are now stale and reference groups that may not exist.
+    try { await supabase.from('fizzbuzz_submissions_v2').delete().not('shuffled_group', 'is', null); } catch (_) {}
 
     // Step H: Build 24 assignment rows
     // person4_secret is stored separately — it is ONLY delivered to the imposter via /api/my-assignment
@@ -1054,7 +1053,6 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
         rows.push({
           participant_id:    m.id,
           participant_name:  m.participant_name,
-          original_team_id:  m.team_id,
           original_team:     (teamMap[m.team_id]||{}).team_name || 'Unknown',
           shuffled_group:    group.groupName,
           session_team_id:   group.groupName,
@@ -1076,7 +1074,6 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       rows.push({
         participant_id:    imp.id,
         participant_name:  imp.participant_name,
-        original_team_id:  imp.team_id,
         original_team:     (teamMap[imp.team_id]||{}).team_name || 'Unknown',
         shuffled_group:    group.groupName,
         session_team_id:   group.groupName,
