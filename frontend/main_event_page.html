@@ -161,8 +161,7 @@
         }
         if (!PARTICIPANT_ID) { window.location.href = 'homepage.html'; }
 
-        // Module-level assignment cache — populated by loadAssignment(), consumed by initGate()
-        // so only ONE /api/my-assignment call is made on page load.
+        // Assignment cache (populated on load for potential future use)
         var _assignmentData = null;
 
         // stopwatch
@@ -313,9 +312,7 @@
                     lockForm(a.github_repo, a.submitted_at, a.github_owner, a.github_repo_name);
                     startPolling();
                 }
-
-                // Pass cached data — no second fetch needed
-                initGate(a);
+                // Note: FizzBuzz gate polling is started automatically by the lockForm override above.
             } catch(e) {
                 document.getElementById('assignment-section').innerHTML = '<div class="state-card error">Unable to reach the server.</div>';
             }
@@ -460,22 +457,9 @@
             }
         };
 
-        // On page load: if already submitted, show gate immediately and start polling
-        (async function initGate(){
-            try {
-                var res  = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
-                var data = await res.json();
-                if (data.success && data.assignment &&
-                    (data.assignment.submission_status === 'Submitted' ||
-                     data.assignment.submission_status === 'Evaluated') &&
-                    data.assignment.github_repo) {
-                    _fbGateActive = true;
-                    showFizzBuzzGate();
-                    checkFizzBuzzGate();
-                    _fbGateInterval = setInterval(checkFizzBuzzGate, 3000);
-                }
-            } catch(e){}
-        })();
+        // On page load: fetch assignment, render UI, and start FizzBuzz gate polling if needed.
+        // lockForm override (above) handles starting _fbGateInterval automatically when called.
+        loadAssignment();
     </script>
 </body>
 </html>
