@@ -4,6 +4,7 @@ const express   = require('express');
 const cors      = require('cors');
 const crypto    = require('crypto');
 const path      = require('path');
+const axios     = require('axios');
 require('dotenv').config();
 
 const { createClient }    = require('@supabase/supabase-js');
@@ -1097,9 +1098,7 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
     const { error: insertErr } = await supabase.from('main_event_assignments').insert(rows).select();
     if (insertErr) return res.status(500).json({ success: false, message: 'Assignment insert failed: ' + insertErr.message });
 
-    // Step I: Lock shuffle
-    await supabase.from('shuffle_lock').update({ is_locked: true, locked_at: new Date().toISOString(), locked_by: 'coordinator' }).eq('id', 1);
-
+    // Do NOT auto-lock — admin must click Lock Shuffle explicitly
     auditLog('start_shuffle', 'all_participants', { groups_created: 6, force_reset: forceReset });
     return res.json({ success: true, imposters_selected: 6, groups_created: 6, assignments_written: true, assignments_count: rows.length });
 
@@ -1512,57 +1511,86 @@ app.get('/api/admin/fizzbuzz/all-submissions', requireAdmin, async (req, res) =>
 });
 
 // ── POST /api/admin/fizzbuzz/run-code ─────────────────────────────────────────
-// Executes submitted FizzBuzz code via Piston API. Does NOT save scores.
+// Executes submitted FizzBuzz code via Judge0 CE (free, no auth).
+// Endpoint: process.env.JUDGE0_URL (default: https://ce.judge0.com)
+// Does NOT save scores.
 app.post('/api/admin/fizzbuzz/run-code', requireAdmin, async (req, res) => {
   try {
     const shuffled_group = String(req.body?.shuffled_group || '').trim();
     const lang_override  = String(req.body?.language || '').trim();
     if (!shuffled_group) return res.status(400).json({ success: false, message: 'shuffled_group is required.' });
 
-    let code = null, language = 'python', submittedBy = 'Unknown';
-
     const { data: fzSub } = await supabase.from('fizzbuzz_submissions_v2')
       .select('fizz_output, language, submitted_by').eq('shuffled_group', shuffled_group).maybeSingle();
 
-    if (fzSub && fzSub.fizz_output) {
-      code = fzSub.fizz_output; language = fzSub.language || 'python'; submittedBy = fzSub.submitted_by;
-    } else {
+    if (!fzSub || !fzSub.fizz_output) {
       return res.status(404).json({ success: false, message: 'No FizzBuzz submission found for group: ' + shuffled_group });
     }
 
-    if (lang_override) language = lang_override;
+    const language    = lang_override || fzSub.language || 'python';
+    const code        = fzSub.fizz_output;
+    const submittedBy = fzSub.submitted_by;
 
-    const langMap = {
-      python: { language: 'python', version: '3' }, python3: { language: 'python', version: '3' },
-      javascript: { language: 'javascript', version: '18' }, js: { language: 'javascript', version: '18' },
-      node: { language: 'javascript', version: '18' }, java: { language: 'java', version: '15' },
-      c: { language: 'c', version: '10' }, cpp: { language: 'c++', version: '10' },
-      'c++': { language: 'c++', version: '10' }, ruby: { language: 'ruby', version: '3' },
-      go: { language: 'go', version: '1' }, rust: { language: 'rust', version: '1' },
-      kotlin: { language: 'kotlin', version: '1' }, typescript: { language: 'typescript', version: '5' },
-      ts: { language: 'typescript', version: '5' }, csharp: { language: 'csharp', version: '6' },
-      'c#': { language: 'csharp', version: '6' }, php: { language: 'php', version: '8' },
-      swift: { language: 'swift', version: '5' }, r: { language: 'r', version: '4' },
+    // Judge0 CE language IDs
+    // Full list: https://ce.judge0.com/languages
+    const langIdMap = {
+      'python':     71,   // Python 3
+      'python3':    71,
+      'javascript': 63,   // JavaScript (Node.js)
+      'js':         63,
+      'node':       63,
+      'java':       62,   // Java
+      'c':          50,   // C (GCC)
+      'cpp':        54,   // C++ (GCC)
+      'c++':        54,
+      'csharp':     51,   // C#
+      'c#':         51,
+      'ruby':       72,   // Ruby
+      'go':         60,   // Go
+      'rust':       73,   // Rust
+      'kotlin':     78,   // Kotlin
+      'typescript': 74,   // TypeScript
+      'ts':         74,
+      'php':        68,   // PHP
+      'swift':      83,   // Swift
+      'r':          80,   // R
     };
-    const mapped = langMap[language.toLowerCase().trim()] || { language: language.toLowerCase(), version: '*' };
 
-    let pistonRes;
-    try {
-      pistonRes = await axios.post('https://emkc.org/api/v2/piston/execute', {
-        language: mapped.language, version: mapped.version,
-        files: [{ name: 'main', content: code }],
-        stdin: '', args: [], compile_timeout: 10000, run_timeout: 5000
-      }, { timeout: 15000, headers: { 'Content-Type': 'application/json' } });
-    } catch (axErr) {
-      return res.status(502).json({ success: false, message: 'Code execution service error: ' + (axErr.response?.data?.message || axErr.message) });
+    const langId = langIdMap[language.toLowerCase().trim()];
+    if (!langId) {
+      return res.status(400).json({ success: false, message: 'Unsupported language: ' + language + '. Supported: Python, JavaScript, Java, C, C++, C#, Ruby, Go, Rust, Kotlin, TypeScript, PHP, Swift, R' });
     }
 
-    const run = pistonRes.data?.run || {}, compile = pistonRes.data?.compile || {};
-    const stdout = run.stdout || '', stderr = run.stderr || compile.stderr || '';
-    const output = (stdout + (stderr ? '\n--- stderr ---\n' + stderr : '')).trim();
+    const judge0Base = (process.env.JUDGE0_URL || 'https://ce.judge0.com').replace(/\/$/, '');
 
-    return res.json({ success: true, shuffled_group, language, submitted_by: submittedBy,
-      stdout, stderr, output: output || '(no output)', exit_code: run.code ?? null });
+    let judgeRes;
+    try {
+      judgeRes = await axios.post(
+        judge0Base + '/submissions?base64_encoded=false&wait=true',
+        { source_code: code, language_id: langId, stdin: '' },
+        { timeout: 20000, headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (axErr) {
+      const msg = axErr.response?.data?.error || axErr.message || 'Judge0 unreachable';
+      console.error('[run-code] judge0 error:', msg);
+      return res.status(502).json({ success: false, message: 'Code execution service error: ' + msg });
+    }
+
+    const d = judgeRes.data || {};
+    const stdout         = d.stdout  || '';
+    const stderr         = d.stderr  || d.compile_output || '';
+    const statusDesc     = d.status?.description || 'Unknown';
+    const exitCode       = d.status?.id === 3 ? 0 : (d.status?.id || null); // 3 = Accepted
+
+    const output = (stdout + (stderr ? '\n--- error ---\n' + stderr : '')).trim();
+
+    return res.json({
+      success: true, shuffled_group, language, submitted_by: submittedBy,
+      stdout, stderr,
+      output:    output || '(no output)',
+      exit_code: exitCode,
+      status:    statusDesc
+    });
   } catch (err) {
     console.error('[run-code]', err.message);
     return res.status(500).json({ success: false, message: err.message });
@@ -1744,6 +1772,36 @@ app.post('/api/admin/unlock-shuffle', requireAdmin, async (req, res) => {
     await supabase.from('shuffle_lock').update({ is_locked: false }).eq('id', 1);
     auditLog('unlock_shuffle', 'shuffle_lock', {});
     return res.json({ success: true, message: 'Shuffle lock removed. You can now run the shuffle again.' });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── GET /api/admin/shuffle-status ─────────────────────────────────────────────
+
+app.get('/api/admin/shuffle-status', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('shuffle_lock').select('is_locked, locked_at, locked_by').eq('id', 1).maybeSingle();
+    if (error) return res.status(500).json({ success: false, message: error.message });
+    const hasAssignments = !!(await supabase.from('main_event_assignments').select('participant_id').limit(1).maybeSingle()).data;
+    return res.json({
+      success:          true,
+      is_locked:        data?.is_locked  ?? false,
+      locked_at:        data?.locked_at  ?? null,
+      locked_by:        data?.locked_by  ?? null,
+      has_assignments:  hasAssignments
+    });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── POST /api/admin/lock-shuffle ──────────────────────────────────────────────
+
+app.post('/api/admin/lock-shuffle', requireAdmin, async (req, res) => {
+  try {
+    await supabase.from('shuffle_lock')
+      .update({ is_locked: true, locked_at: new Date().toISOString(), locked_by: 'coordinator' })
+      .eq('id', 1);
+    auditLog('lock_shuffle', 'shuffle_lock', {});
+    return res.json({ success: true, message: 'Shuffle locked.' });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
