@@ -1087,14 +1087,18 @@ function renderFizzBuzzMonitor(){
             const time   = sub.submitted_at ? new Date(sub.submitted_at).toLocaleTimeString() : '--';
             const rank   = fizzSubmissions.findIndex(s=>s.shuffled_group===gn)+1;
             const lang   = sub.language || 'Unknown';
-            // Escape code for inline HTML attribute (stored in a hidden span, not attribute)
+            // Find the original team of the submitter from allParticipants
+            const submitterP = allParticipants.find(p => p.participant_name === sub.submitted_by && p.shuffled_group === gn);
+            const origTeam   = submitterP?.original_team || '—';
             return `<div class="bg-black/40 border border-emerald-500/30 rounded-xl overflow-hidden">
                 <!-- Header row -->
                 <div class="flex items-center justify-between gap-3 flex-wrap px-4 py-3">
                     <div>
                         <span class="font-orbitron text-xs font-bold text-emerald-400">${e(gn)}</span>
-                        <span class="ml-2 text-[10px] text-gray-400">#${rank} · by ${e(sub.submitted_by)} · ${time}</span>
+                        <span class="ml-2 text-[10px] text-gray-400">#${rank} · by ${e(sub.submitted_by)}</span>
+                        <span class="ml-1 text-[9px] bg-violet-500/10 text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded font-orbitron">${e(origTeam)}</span>
                         <span class="ml-1 text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-1.5 py-0.5 rounded font-orbitron">${e(lang)}</span>
+                        <span class="ml-1 text-[9px] text-gray-500">${time}</span>
                         ${sub.imposter_sabotaged ? '<span class="ml-1 text-[9px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-1.5 py-0.5 rounded font-orbitron">⚠ SABOTAGE</span>' : ''}
                     </div>
                     <div class="flex gap-2 items-center flex-wrap">
@@ -1116,7 +1120,7 @@ function renderFizzBuzzMonitor(){
                 <!-- Code viewer (hidden by default) -->
                 <div id="fb-code-${gid}" class="hidden border-t border-bordergray/40">
                     <div class="flex items-center justify-between px-4 py-2 bg-black/40">
-                        <span class="text-[10px] font-orbitron text-violet-400 uppercase tracking-wider">Source Code — ${e(lang)}</span>
+                        <span class="text-[10px] font-orbitron text-violet-400 uppercase tracking-wider">SOURCE CODE — ${e((lang||'').toUpperCase())}</span>
                         <span class="text-[10px] text-gray-500 font-rajdhani">Read-only · submitted by ${e(sub.submitted_by)}</span>
                     </div>
                     <pre id="fb-pre-${gid}" class="px-4 py-3 text-xs font-mono text-gray-200 bg-black/60 overflow-x-auto whitespace-pre leading-relaxed max-h-72 overflow-y-auto">${e(sub.fizz_output||'')}</pre>
@@ -1244,7 +1248,7 @@ async function refreshFizzToggle(){
     try {
         const r = await fetch(API+'/api/fizzbuzz/toggle');
         const d = await r.json();
-        if(d.success) updateFizzBuzzToggleUI(d.fizzbuzz_open);
+        if(d.success) updateFizzBuzzToggleUI(d.status === 'active' || d.fizzbuzz_open);
     } catch(e){}
 }
 

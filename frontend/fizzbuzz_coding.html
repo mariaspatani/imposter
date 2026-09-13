@@ -58,10 +58,10 @@
     </header>
 
     <div class="container">
-        <!-- Timer (always visible) -->
+        <!-- Event status (replaces timer) -->
         <div class="timer-box">
-            <span class="timer-label"><span class="live-dot" id="live-dot"></span>&nbsp;FIZZBUZZ TIMER:</span>
-            <span class="timer-display" id="timer-display">--:--</span>
+            <span class="timer-label"><span class="live-dot" id="live-dot"></span>&nbsp;FIZZBUZZ STATUS:</span>
+            <span class="timer-display" id="event-status-badge" style="font-size:1.2rem;letter-spacing:2px;">CHECKING...</span>
         </div>
 
         <!-- Expired state -->
@@ -108,10 +108,9 @@
 
     <script>
         var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '')
-            ? 'http://localhost:3000'
-            : '';
+            ? 'http://localhost:3000' : '';
 
-        var PARTICIPANT_ID   = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
+        var PARTICIPANT_ID = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
         if (!PARTICIPANT_ID) {
             var _s = sessionStorage.getItem('imposterParticipant');
             var _p = _s ? JSON.parse(_s) : null;
@@ -121,11 +120,8 @@
 
         var PARTICIPANT_NAME = localStorage.getItem('participant_name') || '';
         var ORIGINAL_TEAM    = localStorage.getItem('imposterTeamName') || '';
-        var timerInterval    = null;   // local 1s countdown
-        var syncInterval     = null;   // 15s server re-sync
-        var remainingSecs    = 0;
-        var timerStatus      = 'idle';
-        var alreadyExpired   = false;
+        var statusPoll       = null;   // polls /api/fizzbuzz/toggle for close
+        var lockPollInterval = null;   // polls for group submission by another member
 
         // ── Space background ──────────────────────────────────────────────────
         var cv=document.getElementById('space-bg'),cx=cv.getContext('2d');
@@ -133,207 +129,160 @@
         var st=[];for(var i=0;i<150;i++)st.push({x:Math.random()*cv.width,y:Math.random()*cv.height,r:Math.random()*1.8,c:['#fff','#ff1e43','#00f0ff','#6b21a8'][Math.floor(Math.random()*4)],s:Math.random()*0.5+0.1});
         (function a(){cx.clearRect(0,0,cv.width,cv.height);st.forEach(function(s){cx.beginPath();cx.arc(s.x,s.y,s.r,0,Math.PI*2);cx.fillStyle=s.c;cx.fill();s.y+=s.s;if(s.y>cv.height){s.y=0;s.x=Math.random()*cv.width;}});requestAnimationFrame(a);})();
 
-        function fmtTime(s){ s=Math.max(0,s); var m=Math.floor(s/60),sec=s%60; return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0'); }
+        // ── Status helpers ────────────────────────────────────────────────────
+        function setStatusBadge(text, color){
+            var badge = document.getElementById('event-status-badge');
+            if(!badge) return;
+            badge.textContent = text;
+            badge.style.color = color;
+        }
 
-        // ── Timer states ──────────────────────────────────────────────────────
-        function markExpired(){
-            if (alreadyExpired) return;
-            alreadyExpired = true;
-            clearInterval(timerInterval); timerInterval = null;
-            clearInterval(syncInterval);  syncInterval  = null;
-            document.getElementById('timer-display').innerText  = '00:00';
-            document.getElementById('timer-display').className  = 'timer-display expired';
+        function closedState(){
+            clearInterval(statusPoll); clearInterval(lockPollInterval);
+            setStatusBadge('● CLOSED', 'var(--crimson-red)');
             document.getElementById('state-expired').style.display = 'block';
             document.getElementById('form-panel').style.display    = 'none';
             var dot = document.getElementById('live-dot');
-            if (dot){ dot.style.animation='none'; dot.style.backgroundColor='#c00d2e'; dot.style.boxShadow='none'; }
+            if(dot){ dot.style.animation='none'; dot.style.backgroundColor='#c00d2e'; dot.style.boxShadow='none'; }
         }
 
-        function markWaiting(){
-            clearInterval(timerInterval); timerInterval = null;
-            document.getElementById('timer-display').innerText = '--:--';
-            document.getElementById('timer-display').className = 'timer-display';
+        function waitingState(){
+            setStatusBadge('● WAITING', '#9db5d3');
             document.getElementById('state-expired').style.display = 'none';
-            // Show waiting notice inside form panel
             var locked = document.getElementById('locked-notice');
-            if (locked){
-                locked.innerText = '⏳ Waiting for coordinator to start FizzBuzz...';
-                locked.style.display = 'block';
-            }
+            if(locked){ locked.innerText='⏳ Waiting for coordinator to start FizzBuzz...'; locked.style.display='block'; }
             document.getElementById('fizzbuzz-form').style.display = 'none';
         }
 
-        function startCountdown(){
-            clearInterval(timerInterval);
-            timerInterval = setInterval(function(){
-                if (alreadyExpired){ clearInterval(timerInterval); timerInterval=null; return; }
-                remainingSecs = Math.max(0, remainingSecs - 1);
-                document.getElementById('timer-display').innerText = fmtTime(remainingSecs);
-                if (remainingSecs <= 0) markExpired();
-            }, 1000);
-        }
-
-        // ── 15-second server re-sync ──────────────────────────────────────────
-        // Uses /api/fizzbuzz/toggle (no auth, lightweight) to correct drift
-        // and detect pause / finish without relying on the participant status endpoint.
-        function startSyncPoll(){
-            clearInterval(syncInterval);
-            syncInterval = setInterval(async function(){
-                if (alreadyExpired){ clearInterval(syncInterval); return; }
+        // ── Event status poll (every 5s once loaded) ─────────────────────────
+        function startStatusPoll(){
+            clearInterval(statusPoll);
+            statusPoll = setInterval(async function(){
                 try {
-                    var r = await fetch(API_BASE + '/api/fizzbuzz/toggle');
-                    if (!r.ok) return;                    // network blip — ignore, don't expire
+                    var r = await fetch(API_BASE+'/api/fizzbuzz/toggle');
+                    if(!r.ok) return;
                     var d = await r.json();
-                    if (!d.success) return;
-                    var live = Math.max(0, d.remaining_seconds || 0);
-
-                    if (d.status === 'finished' || live <= 0){
-                        markExpired(); return;
-                    }
-                    if (d.status === 'paused'){
-                        clearInterval(timerInterval); timerInterval = null;
-                        remainingSecs = live;
-                        document.getElementById('timer-display').innerText = fmtTime(live);
-                        return;
-                    }
-                    if (d.status === 'running'){
-                        // Correct drift — update display but restart interval only if it stopped
-                        remainingSecs = live;
-                        document.getElementById('timer-display').innerText = fmtTime(live);
-                        if (!timerInterval) startCountdown();
-                        // Re-show form if it was hidden for waiting state
-                        if (document.getElementById('form-panel').style.display === 'none' && !alreadyExpired){
-                            document.getElementById('form-panel').style.display = 'block';
-                        }
-                    }
-                    // idle/waiting → keep polling silently
-                } catch(e){}   // network error — never treat as expired
-            }, 15000);
+                    if(d.status === 'closed') closedState();
+                } catch(e){}
+            }, 5000);
         }
 
         // ── Load page ─────────────────────────────────────────────────────────
         async function loadPage(){
-            // Step 1: Timer — use /api/fizzbuzz/toggle (no auth required, never 500s on integer IDs)
-            var timerOk = false;
+            // 1. Check event status
             try {
-                var tr = await fetch(API_BASE + '/api/fizzbuzz/toggle');
-                if (tr.ok) {
-                    var td = await tr.json();
-                    if (td.success) {
-                        timerOk       = true;
-                        timerStatus   = td.status || 'idle';
-                        remainingSecs = Math.max(0, td.remaining_seconds || 0);
-                        document.getElementById('timer-display').innerText = fmtTime(remainingSecs);
+                var tr = await fetch(API_BASE+'/api/fizzbuzz/toggle');
+                var td = tr.ok ? await tr.json() : { success:false, status:'waiting' };
 
-                        if (timerStatus === 'finished' || (remainingSecs <= 0 && timerStatus !== 'paused')){
-                            markExpired();
-                            // Continue below to still load participant info
-                        } else if (timerStatus === 'running'){
-                            startCountdown();
-                        }
-                        // Always start sync poll so we catch future state changes
-                        startSyncPoll();
-                    }
+                if(td.status === 'closed'){
+                    // Show info card (so participant sees their name) then closed state
+                    document.getElementById('info-card').style.display = 'block';
+                    setStatusBadge('● CLOSED', 'var(--crimson-red)');
+                    document.getElementById('state-expired').style.display = 'block';
+                    loadParticipantInfo(false);
+                    return;
                 }
+
+                if(td.status !== 'active'){
+                    // waiting
+                    setStatusBadge('● WAITING', '#9db5d3');
+                    document.getElementById('info-card').style.display = 'block';
+                    document.getElementById('form-panel').style.display = 'block';
+                    loadParticipantInfo(false);
+                    waitingState();
+                    // Poll until active
+                    statusPoll = setInterval(async function(){
+                        try {
+                            var r = await fetch(API_BASE+'/api/fizzbuzz/toggle');
+                            var d = r.ok ? await r.json() : {};
+                            if(d.status === 'active'){ clearInterval(statusPoll); loadPage(); }
+                            else if(d.status === 'closed'){ clearInterval(statusPoll); closedState(); }
+                        } catch(e){}
+                    }, 3000);
+                    return;
+                }
+
+                // ── ACTIVE ──
+                setStatusBadge('● ACTIVE', 'var(--green-accent)');
+                document.getElementById('info-card').style.display  = 'block';
+                document.getElementById('form-panel').style.display = 'block';
+                startStatusPoll();
+
             } catch(e){
-                // Network error — show "--:--", do NOT mark expired
-                document.getElementById('timer-display').innerText = '--:--';
-                console.error('[timer fetch]', e);
+                // Network error — show form anyway, don't block participant
+                document.getElementById('info-card').style.display  = 'block';
+                document.getElementById('form-panel').style.display = 'block';
+                setStatusBadge('● CONNECTING…', '#9db5d3');
+                setTimeout(loadPage, 4000);
             }
 
-            // Step 2: Participant info — /api/fizzbuzz/status/:id  (now accepts integers)
+            // 2. Load participant info
+            loadParticipantInfo(true);
+        }
+
+        async function loadParticipantInfo(startLock){
             try {
-                var ar = await fetch(API_BASE + '/api/fizzbuzz/status/' + PARTICIPANT_ID);
-                var ad = (ar.ok) ? await ar.json() : { success: false };
+                var ar = await fetch(API_BASE+'/api/fizzbuzz/status/'+PARTICIPANT_ID);
+                var ad = ar.ok ? await ar.json() : { success:false };
 
-                // Always show the info card once we have a participant
-                document.getElementById('info-card').style.display = 'block';
-
-                // Fill in name / team
-                document.getElementById('info-name').innerText =
-                    PARTICIPANT_NAME || (ad.success ? ad.participant_name : '') || '--';
+                document.getElementById('info-name').innerText = PARTICIPANT_NAME || (ad.success ? ad.participant_name : '') || '--';
                 document.getElementById('info-team').innerText = ORIGINAL_TEAM || '--';
 
                 // Resolve shuffled group
                 var resolvedGroup = (ad.success && ad.shuffled_group) || localStorage.getItem('fizzbuzz_group') || '';
-                if (!resolvedGroup){
+                if(!resolvedGroup){
                     try {
-                        var mr = await fetch(API_BASE + '/api/my-assignment/' + PARTICIPANT_ID);
-                        var md = mr.ok ? await mr.json() : { success:false };
-                        if (md.success && md.assignment && md.assignment.shuffled_group)
+                        var mr = await fetch(API_BASE+'/api/my-assignment/'+PARTICIPANT_ID);
+                        var md = mr.ok ? await mr.json() : {};
+                        if(md.success && md.assignment && md.assignment.shuffled_group)
                             resolvedGroup = md.assignment.shuffled_group;
                     } catch(e2){}
                 }
-                var groupEl  = document.getElementById('info-group');
-                var groupSel = document.getElementById('info-group-select');
-                if (resolvedGroup){
-                    groupEl.innerText = resolvedGroup;
-                    if (groupSel) groupSel.style.display = 'none';
-                    localStorage.setItem('fizzbuzz_group', resolvedGroup);
-                } else {
-                    groupEl.style.display = 'none';
-                    if (groupSel) groupSel.style.display = 'inline-block';
-                }
+                var groupEl = document.getElementById('info-group');
+                if(resolvedGroup){ groupEl.innerText = resolvedGroup; localStorage.setItem('fizzbuzz_group', resolvedGroup); }
+                else { groupEl.innerText = '--'; }
 
-                // Show form panel only if round is active
-                if (!alreadyExpired){
-                    document.getElementById('form-panel').style.display = 'block';
-
-                    if (timerStatus === 'idle' || timerStatus === 'waiting'){
-                        // Round hasn't started yet
-                        markWaiting();
-                    } else if (timerStatus === 'paused'){
-                        // Frozen timer — form visible but show notice
-                        var locked = document.getElementById('locked-notice');
-                        if (locked){ locked.innerText = '⏸ Timer is paused. Wait for coordinator to resume.'; locked.style.display='block'; }
-                        document.getElementById('fizzbuzz-form').style.display = 'none';
-                    }
-                }
-
-                // Group already submitted — lock form
-                if (ad.success && (ad.group_submitted || ad.fizzbuzz_locked)){
-                    document.getElementById('locked-notice').innerText = '🔒 Submitted Successfully — Evaluation in Progress';
-                    document.getElementById('locked-notice').style.display = 'block';
-                    document.getElementById('fizzbuzz-form').style.display = 'none';
-                }
-
-            } catch(e){
-                // Participant info failed — show retry notice, DO NOT mark expired
-                document.getElementById('info-card').style.display  = 'block';
-                document.getElementById('form-panel').style.display = 'block';
-                var locked = document.getElementById('locked-notice');
-                if (locked){
-                    locked.innerText = '⚠ Unable to connect to server. Retrying…';
-                    locked.style.background = 'rgba(255,30,67,0.1)';
-                    locked.style.borderColor = 'rgba(255,30,67,0.4)';
-                    locked.style.color = '#ffbfd0';
+                // Already submitted by this group?
+                if(ad.success && (ad.group_submitted || ad.fizzbuzz_locked)){
+                    var sub = ad.group_submission;
+                    var locked = document.getElementById('locked-notice');
+                    locked.innerHTML = '🔒 <strong>SUBMITTED</strong>'
+                        + (sub ? '<br>Submitted by: '+ escHtml(sub.submitted_by) + '<br>Time: ' + new Date(sub.submitted_at).toLocaleTimeString() : '')
+                        + '<br><span style="font-size:0.8rem;color:#9db5d3;">Waiting for coordinator scoring.</span>';
                     locked.style.display = 'block';
+                    document.getElementById('fizzbuzz-form').style.display = 'none';
+                    clearInterval(lockPollInterval);
+                    return;
                 }
-                console.error('[participant fetch]', e);
-                // Retry in 5s
-                setTimeout(loadPage, 5000);
-            }
+
+                // Start group lock poll so this participant sees when another group member submits
+                if(startLock) startLockPoll();
+
+            } catch(e){ console.error('[participant info]', e); }
         }
 
-        // ── Poll for group lock (other member submitted) ───────────────────────
-        var lockPollInterval = null;
+        // ── Poll for group lock ───────────────────────────────────────────────
         function startLockPoll(){
             clearInterval(lockPollInterval);
             lockPollInterval = setInterval(async function(){
-                if (alreadyExpired){ clearInterval(lockPollInterval); return; }
                 try {
-                    var r = await fetch(API_BASE + '/api/fizzbuzz/status/' + PARTICIPANT_ID);
-                    if (!r.ok) return;
+                    var r = await fetch(API_BASE+'/api/fizzbuzz/status/'+PARTICIPANT_ID);
+                    if(!r.ok) return;
                     var d = await r.json();
-                    if (d.success && (d.group_submitted || d.fizzbuzz_locked)){
+                    if(d.success && (d.group_submitted || d.fizzbuzz_locked)){
                         clearInterval(lockPollInterval);
-                        document.getElementById('locked-notice').innerText = '🔒 Submitted Successfully — Evaluation in Progress';
-                        document.getElementById('locked-notice').style.display = 'block';
+                        var sub = d.group_submission;
+                        var locked = document.getElementById('locked-notice');
+                        locked.innerHTML = '🔒 <strong>SUBMITTED</strong>'
+                            + (sub ? '<br>Submitted by: '+ escHtml(sub.submitted_by) + '<br>Time: ' + new Date(sub.submitted_at).toLocaleTimeString() : '');
+                        locked.style.display = 'block';
                         document.getElementById('fizzbuzz-form').style.display = 'none';
                     }
                 } catch(e){}
             }, 4000);
         }
+
+        function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
         // ── Submit code ───────────────────────────────────────────────────────
         async function submitCode(e){
@@ -342,34 +291,33 @@
             var lang = document.getElementById('lang-select').value;
             var btn  = document.getElementById('submit-btn');
             var msg  = document.getElementById('status-msg');
-            if (!code){ alert('Please paste your FizzBuzz solution.'); return; }
+            if(!code){ alert('Please paste your FizzBuzz solution.'); return; }
 
             btn.disabled = true; btn.textContent = 'SUBMITTING...';
             msg.style.display = 'none';
             try {
-                var res = await fetch(API_BASE + '/api/fizzbuzz/submit-v2', {
+                var res = await fetch(API_BASE+'/api/fizzbuzz/submit-v2', {
                     method:'POST', headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({ participant_id: PARTICIPANT_ID, fizz_output: code, language: lang, repo_url: '' })
+                    body: JSON.stringify({ participant_id: PARTICIPANT_ID, fizz_output: code, language: lang })
                 });
                 var data = await res.json();
 
-                if (res.status === 409){
-                    document.getElementById('locked-notice').innerText = '🔒 Submitted Successfully — Evaluation in Progress';
-                    document.getElementById('locked-notice').style.display = 'block';
+                if(res.status === 409){
+                    var locked = document.getElementById('locked-notice');
+                    locked.innerText = '🔒 Your group has already submitted.';
+                    locked.style.display = 'block';
                     document.getElementById('fizzbuzz-form').style.display = 'none';
                     return;
                 }
-                if (res.ok && data.success){
-                    clearInterval(timerInterval);
+                if(res.ok && data.success){
                     clearInterval(lockPollInterval);
                     btn.disabled = true; btn.textContent = 'SUBMITTED';
                     document.getElementById('code-area').disabled = true;
                     msg.style.display = 'block'; msg.className = 'status-msg';
-                    function esc2(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-                    msg.innerHTML = '&#10003; SOLUTION SUBMITTED SUCCESSFULLY!<br>'+
-                        '<strong>Group:</strong> '+esc2(data.shuffled_group||'--')+'<br>'+
-                        '<strong>Submitted by:</strong> '+esc2(data.submitted_by||'--')+'<br>'+
-                        '<strong>Language:</strong> '+esc2(lang);
+                    msg.innerHTML = '&#10003; SOLUTION SUBMITTED SUCCESSFULLY!<br>'
+                        + '<strong>Group:</strong> ' + escHtml(data.shuffled_group||'--') + '<br>'
+                        + '<strong>Submitted by:</strong> ' + escHtml(data.submitted_by||'--') + '<br>'
+                        + '<strong>Language:</strong> ' + escHtml(lang);
                     return;
                 }
                 msg.style.display = 'block'; msg.className = 'status-msg error';
@@ -383,7 +331,6 @@
         }
 
         loadPage();
-        setTimeout(startLockPoll, 3000);
     </script>
 </body>
 </html>
