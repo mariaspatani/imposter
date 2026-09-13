@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "backend/server.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "frontend/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    { "src": "/api/(.*)",          "dest": "backend/server.js" },
+
+    { "src": "/admin",             "dest": "frontend/admindashboard.html" },
+    { "src": "/coordinator",       "dest": "frontend/team_registration.html" },
+    { "src": "/fizzbuzz",          "dest": "frontend/fizzbuzz.html" },
+    { "src": "/fizzbuzz-coding",   "dest": "frontend/fizzbuzz_coding.html" },
+    { "src": "/game",              "dest": "frontend/main_event_page.html" },
+    { "src": "/code-imposter",     "dest": "frontend/codeimposter.html" },
+
+    { "src": "/frontend/(.*)",     "dest": "frontend/$1" },
+    { "src": "/(.*\\.html)",       "dest": "frontend/$1" },
+    { "src": "/",                  "dest": "frontend/homepage.html" }
+  ]
+}

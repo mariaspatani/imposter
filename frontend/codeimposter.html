@@ -312,6 +312,10 @@
 
     <!-- JavaScript Logic -->
     <script>
+        var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '')
+            ? 'http://localhost:3000'
+            : '';
+
         // 1. Space Canvas Animation
         const canvas = document.getElementById('space-bg');
         const ctx = canvas.getContext('2d');
@@ -373,39 +377,102 @@
         updateTimer();
         timerInterval = setInterval(updateTimer, 1000);
 
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+
         // 3. Form Submission
-        function submitTask(event) {
+        async function submitTask(event) {
             event.preventDefault();
 
-            // Freeze timer
-            clearInterval(timerInterval);
+            const recordTime      = document.getElementById('timer').textContent;
+            const participantName = document.getElementById('participant-id').value.trim();
+            const submitBtn       = document.getElementById('submit-btn');
+            const statusMsg       = document.getElementById('status-msg');
 
-            // Turn off glowing live dot
-            const dot = document.getElementById('live-dot');
-            dot.style.animation = 'none';
-            dot.style.backgroundColor = '#555';
-            dot.style.boxShadow = 'none';
+            if (!participantName) return;
 
-            const recordTime = document.getElementById('timer').textContent;
-            const participantName = document.getElementById('participant-id').value;
+            submitBtn.disabled     = true;
+            submitBtn.textContent  = 'SUBMITTING...';
+            submitBtn.style.opacity = '0.7';
 
-            // Lock input field
-            document.getElementById('participant-id').disabled = true;
+            try {
+                const res  = await fetch(API_BASE + '/api/code-imposter/submit', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({
+                        participant_name: participantName,
+                        completion_time:  recordTime
+                    })
+                });
+                const data = await res.json();
 
-            const submitBtn = document.getElementById('submit-btn');
-            submitBtn.disabled = true;
-            submitBtn.style.opacity = '0.5';
-            submitBtn.style.cursor = 'not-allowed';
-            submitBtn.textContent = 'SUBMITTED';
+                // Freeze timer regardless of server response
+                clearInterval(timerInterval);
 
-            // Show Confirmation Message
-            const statusMsg = document.getElementById('status-msg');
-            statusMsg.style.display = 'block';
-            statusMsg.innerHTML = `
-                ✓ SUBMISSION SUCCESSFUL!<br>
-                Participant: <strong>${participantName}</strong><br>
-                Final Time: <strong>${recordTime} (MM:SS)</strong>
-            `;
+                // Turn off glowing live dot
+                const dot = document.getElementById('live-dot');
+                dot.style.animation       = 'none';
+                dot.style.backgroundColor = '#555';
+                dot.style.boxShadow       = 'none';
+
+                // Lock input field
+                document.getElementById('participant-id').disabled = true;
+                submitBtn.style.opacity = '0.5';
+                submitBtn.style.cursor  = 'not-allowed';
+
+                if (res.ok && data && data.success) {
+                    submitBtn.textContent     = 'SUBMITTED';
+                    statusMsg.style.display   = 'block';
+                    statusMsg.style.borderColor = 'var(--green-glow)';
+                    statusMsg.style.color       = 'var(--green-glow)';
+                    statusMsg.innerHTML =
+                        '&#10003; SUBMISSION SUCCESSFUL!<br>' +
+                        'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
+                        'Final Time: <strong>' + escHtml(recordTime) + ' (MM:SS)</strong>';
+                } else if (res.status === 409 && data && data.already_submitted) {
+                    // Already submitted — show the existing time
+                    submitBtn.textContent     = 'ALREADY SUBMITTED';
+                    statusMsg.style.display   = 'block';
+                    statusMsg.style.borderColor = 'var(--green-glow)';
+                    statusMsg.style.color       = 'var(--green-glow)';
+                    statusMsg.innerHTML =
+                        '&#10003; Already submitted.<br>' +
+                        'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
+                        'Recorded Time: <strong>' + escHtml(data.completion_time || recordTime) + '</strong>';
+                } else {
+                    // Server rejected — still lock UI (time is recorded) but show warning
+                    submitBtn.textContent     = 'SUBMITTED';
+                    statusMsg.style.display   = 'block';
+                    statusMsg.style.borderColor = '#ff8c00';
+                    statusMsg.style.color       = '#ff8c00';
+                    const serverMsg = (data && data.message) ? escHtml(data.message) : 'Server could not save — inform coordinator.';
+                    statusMsg.innerHTML =
+                        '&#9888; Time recorded locally.<br>' +
+                        'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
+                        'Final Time: <strong>' + escHtml(recordTime) + '</strong><br>' +
+                        '<small>' + serverMsg + '</small>';
+                }
+            } catch (err) {
+                // Network error — still freeze/lock but warn
+                clearInterval(timerInterval);
+                const dot = document.getElementById('live-dot');
+                dot.style.animation = 'none'; dot.style.backgroundColor = '#555'; dot.style.boxShadow = 'none';
+                document.getElementById('participant-id').disabled = true;
+                submitBtn.textContent   = 'SUBMITTED (OFFLINE)';
+                submitBtn.style.opacity = '0.5';
+                submitBtn.style.cursor  = 'not-allowed';
+                statusMsg.style.display     = 'block';
+                statusMsg.style.borderColor = '#ff8c00';
+                statusMsg.style.color       = '#ff8c00';
+                statusMsg.innerHTML =
+                    '&#9888; Time recorded locally (server unreachable).<br>' +
+                    'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
+                    'Final Time: <strong>' + escHtml(recordTime) + '</strong><br>' +
+                    '<small>Inform the coordinator to record this manually.</small>';
+            }
         }
     </script>
 </body>

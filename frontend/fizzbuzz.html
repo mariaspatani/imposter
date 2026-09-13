@@ -181,6 +181,10 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
     </div>
 
     <script>
+        var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '')
+            ? 'http://localhost:3000'
+            : '';
+
         var PARTICIPANT_ID   = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
         if (!PARTICIPANT_ID) {
             var _s = sessionStorage.getItem('imposterParticipant');
@@ -230,7 +234,7 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
         async function loadStatus(){
             try {
                 // Check toggle
-                var tr = await fetch('http://localhost:3000/api/fizzbuzz/toggle');
+                var tr = await fetch(API_BASE + '/api/fizzbuzz/toggle');
                 var td = await tr.json();
                 if (!td.success) { showState('waiting'); return; }
 
@@ -241,14 +245,14 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
                 if (!td.fizzbuzz_open) { showState('waiting'); return; }
 
                 // Get participant info + role
-                var ar = await fetch('http://localhost:3000/api/fizzbuzz/status/'+PARTICIPANT_ID);
+                var ar = await fetch(API_BASE + '/api/fizzbuzz/status/'+PARTICIPANT_ID);
                 var ad = await ar.json();
 
                 // Fetch shuffled_group from main_event_assignments as authoritative source
                 var shuffledGroup = (ad.success && ad.shuffled_group) || '';
                 if (!shuffledGroup) {
                     try {
-                        var mr = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
+                        var mr = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                         var md = await mr.json();
                         if (md.success && md.assignment && md.assignment.shuffled_group) {
                             shuffledGroup = md.assignment.shuffled_group;
@@ -278,7 +282,7 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
                 var isImposter = (ad.success && ad.is_imposter) ? true : false;
                 if (!isImposter) {
                     try {
-                        var mr2 = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
+                        var mr2 = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                         var md2 = await mr2.json();
                         if (md2.success && md2.assignment && md2.assignment.is_imposter === true) {
                             isImposter = true;
@@ -296,7 +300,7 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
         // Poll for status change while waiting
         pollInterval = setInterval(async function(){
             try {
-                var r = await fetch('http://localhost:3000/api/fizzbuzz/toggle');
+                var r = await fetch(API_BASE + '/api/fizzbuzz/toggle');
                 var d = await r.json();
                 if (d.fizzbuzz_open || d.status === 'finished') {
                     clearInterval(pollInterval);

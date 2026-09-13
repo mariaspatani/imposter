@@ -603,7 +603,60 @@
         </div>
     </div>
 
+    <!-- ── Admin Login Modal ── -->
+    <div id="login-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);backdrop-filter:blur(8px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;">
+        <div style="background:#0b1223;border:1px solid rgba(0,240,255,0.3);border-radius:16px;max-width:360px;width:100%;padding:32px;display:flex;flex-direction:column;gap:16px;">
+            <h2 style="font-family:Orbitron,sans-serif;color:#00f0ff;font-size:1rem;text-align:center;margin:0;">COORDINATOR LOGIN</h2>
+            <p style="color:#9db5d3;font-size:0.85rem;text-align:center;margin:0;">Enter the admin secret to continue.</p>
+            <input id="tr-login-secret" type="password" placeholder="Admin secret..."
+                style="background:#050816;border:1px solid rgba(0,240,255,0.3);border-radius:8px;padding:12px 16px;color:#fff;font-family:monospace;font-size:0.95rem;outline:none;width:100%;"
+                onkeydown="if(event.key==='Enter') doTRLogin()">
+            <div id="tr-login-error" style="color:#ff4d6d;font-size:0.8rem;display:none;"></div>
+            <button onclick="doTRLogin()" style="background:linear-gradient(90deg,#ff1e43,#c00d2e);color:#fff;font-family:Orbitron,sans-serif;font-size:0.9rem;padding:12px;border:none;border-radius:8px;cursor:pointer;">AUTHENTICATE</button>
+        </div>
+    </div>
+
     <script>
+        const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '')
+            ? 'http://localhost:3000'
+            : '';
+
+        function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+        // ── Admin auth ──────────────────────────────────────────────────────────
+        let ADMIN_TOKEN = sessionStorage.getItem('admin_token') || '';
+
+        function authHeaders(extra = {}) {
+            return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ADMIN_TOKEN, ...extra };
+        }
+
+        async function doTRLogin() {
+            const secret = document.getElementById('tr-login-secret').value.trim();
+            const errEl  = document.getElementById('tr-login-error');
+            errEl.style.display = 'none';
+            try {
+                const r = await fetch(API_BASE + '/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secret })
+                });
+                const d = await r.json();
+                if (r.ok && d.success) {
+                    ADMIN_TOKEN = d.token;
+                    sessionStorage.setItem('admin_token', ADMIN_TOKEN);
+                    document.getElementById('login-modal').style.display = 'none';
+                    loadRegisteredTeams();
+                    loadSeatingArrangement();
+                } else {
+                    errEl.textContent = d.message || 'Invalid secret.';
+                    errEl.style.display = 'block';
+                }
+            } catch (ex) {
+                errEl.textContent = 'Cannot reach server.';
+                errEl.style.display = 'block';
+            }
+        }
+
         /* ── Space background ── */
         const canvas = document.getElementById('space-bg');
         const ctx = canvas.getContext('2d');
@@ -771,7 +824,7 @@
 
         async function loadRegisteredTeams() {
             try {
-                const response = await fetch('http://localhost:3000/api/registered-teams');
+                const response = await fetch(API_BASE + '/api/registered-teams', { headers: authHeaders() });
                 const data = await response.json();
                 if (!response.ok || !data || data.success !== true) {
                     registeredTeamsListEl.innerHTML = '<div class="team-card"><strong>Unable to load registered teams.</strong></div>';
@@ -830,7 +883,7 @@
 
         async function loadSeatingArrangement() {
             try {
-                const response = await fetch('http://localhost:3000/api/shuffle-layout');
+                const response = await fetch(API_BASE + '/api/shuffle-layout', { headers: authHeaders() });
                 const data = await response.json();
                 if (!response.ok || !data || data.success !== true) {
                     seatingGroupsEl.innerHTML = '<div class="team-card">Seating arrangement unavailable.</div>';
@@ -935,7 +988,7 @@
 
         /* ── Shuffle trigger ── */
         async function triggerShuffle() {
-            const teamData = await fetch('http://localhost:3000/api/registered-teams');
+            const teamData = await fetch(API_BASE + '/api/registered-teams', { headers: authHeaders() });
             const teamPayload = await teamData.json();
             const teams = teamPayload && teamPayload.success === true ? (teamPayload.teams || []) : [];
 
@@ -952,9 +1005,9 @@
             const animPromise = runOverlayAnimation();
 
             try {
-                const response = await fetch('http://localhost:3000/api/start-shuffle', {
+                const response = await fetch(API_BASE + '/api/start-shuffle', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: authHeaders()
                 });
                 const data = await response.json();
 
@@ -1017,32 +1070,39 @@
             }
 
             try {
-                const response = await fetch('http://localhost:3000/api/register-team', {
+                const response = await fetch(API_BASE + '/api/register-team', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: authHeaders(),
                     body: JSON.stringify({ team_name: teamName, members: members })
                 });
                 const data = await response.json();
                 if (response.ok && data && data.success === true) {
                     responseBox.className = 'response-box success';
-                    responseBox.innerHTML = `Team registered successfully.<br><strong>Team Code:</strong> ${data.team_code}<br>Participants can now authenticate from the homepage using the exact team and participant names.`;
+                    responseBox.textContent = '';
+                    responseBox.innerHTML = 'Team registered successfully.<br><strong>Team Code: ' + esc(data.team_code || '') + '</strong><br>Participants can now authenticate from the homepage using the exact team and participant names.';
                     responseBox.style.display = 'block';
                     form.reset();
                     await loadRegisteredTeams();
                     return;
                 }
                 responseBox.className = 'response-box error';
-                responseBox.innerHTML = data && data.message ? data.message : 'Team registration failed.';
+                responseBox.textContent = data && data.message ? data.message : 'Team registration failed.';
                 responseBox.style.display = 'block';
             } catch (error) {
                 responseBox.className = 'response-box error';
-                responseBox.innerHTML = 'Unable to reach the registration server. Make sure the backend is running on localhost:3000.';
+                responseBox.innerHTML = 'Unable to reach the registration server.';
                 responseBox.style.display = 'block';
             }
         });
 
-        loadRegisteredTeams();
-        loadSeatingArrangement();
+        // Show login modal if no token; otherwise load data directly
+        if (!ADMIN_TOKEN) {
+            document.getElementById('login-modal').style.display = 'flex';
+        } else {
+            document.getElementById('login-modal').style.display = 'none';
+            loadRegisteredTeams();
+            loadSeatingArrangement();
+        }
     </script>
 </body>
 </html>

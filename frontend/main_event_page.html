@@ -137,7 +137,6 @@
                 </div>
             </div>
         </div>
-    </div>
 
         <!-- FizzBuzz Navigation Gate (Part 5) — shown after GitHub submission -->
         <div id="fizzbuzz-section" style="display:none;">
@@ -150,6 +149,10 @@
     </div>
 
     <script>
+        var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '')
+            ? 'http://localhost:3000'
+            : '';
+
         var PARTICIPANT_ID = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
         if (!PARTICIPANT_ID) {
             var _s = sessionStorage.getItem('imposterParticipant');
@@ -157,6 +160,9 @@
             PARTICIPANT_ID = _p && _p.id ? String(_p.id) : null;
         }
         if (!PARTICIPANT_ID) { window.location.href = 'homepage.html'; }
+
+        // Assignment cache (populated on load for potential future use)
+        var _assignmentData = null;
 
         // stopwatch
         var elapsedSeconds = 0, stopwatchEl = document.getElementById('stopwatch'), swInterval = setInterval(tick, 1000);
@@ -184,10 +190,16 @@
                 '<div class="work-block">'+
                   '<div class="work-block-label">Your Role</div>'+
                   '<div class="work-role-title">'+esc(a.role_name)+'</div>'+
+                  '<div class="work-block-label" style="margin-top:10px;">Cover Job (What the team thinks you\'re doing)</div>'+
                   '<div class="work-text">'+esc(a.work_description)+'</div>'+
                 '</div>';
-            if (a.is_imposter) {
-                html += '<div class="work-block secret"><div class="work-block-label">&#9888; Secret Objective &mdash; Do Not Share</div><div class="work-role-title">The above is your SECRET task. Do not reveal it to anyone.</div></div>';
+            if (a.is_imposter && a.secret_objective) {
+                html += '<div class="work-block secret">'+
+                  '<div class="work-block-label">&#9888; SECRET SABOTAGE OBJECTIVE &mdash; DO NOT SHARE WITH ANYONE</div>'+
+                  '<div class="work-text">'+esc(a.secret_objective)+'</div>'+
+                '</div>';
+            } else if (a.is_imposter) {
+                html += '<div class="work-block secret"><div class="work-block-label">&#9888; Secret Objective</div><div class="work-text">Loading secret objective... If this persists, contact the coordinator.</div></div>';
             }
             html += '</div>';
             document.getElementById('assignment-section').innerHTML = html;
@@ -199,6 +211,18 @@
             document.getElementById('eval-spinner').style.display = 'block';
             document.getElementById('eval-status-label').innerText = 'AI Evaluation In Progress...';
             document.getElementById('eval-pending-msg').style.display = 'block';
+            document.getElementById('eval-pending-msg').innerText = 'Your repository is being evaluated by AI. This may take up to 60 seconds.';
+            document.getElementById('eval-results').style.display = 'none';
+        }
+
+        function showEvalFailed(msg) {
+            document.getElementById('eval-section').style.display = 'block';
+            var card = document.getElementById('eval-card');
+            card.className = 'eval-card failed';
+            document.getElementById('eval-spinner').style.display = 'none';
+            document.getElementById('eval-status-label').innerText = 'Evaluation Failed';
+            document.getElementById('eval-pending-msg').style.display = 'block';
+            document.getElementById('eval-pending-msg').innerText = (msg || 'AI evaluation failed. Your submission is safe. Please ask the coordinator to trigger re-evaluation from the admin dashboard.');
             document.getElementById('eval-results').style.display = 'none';
         }
 
@@ -212,11 +236,11 @@
             document.getElementById('eval-results').style.display = 'block';
             document.getElementById('eval-score-num').innerText = a.ai_score != null ? a.ai_score : '--';
             var breakdowns = [
-                { label:'UI Design',       val: a.ui_score,           max:20 },
-                { label:'Task Completion', val: a.task_match_score,   max:30 },
-                { label:'Logic & Code',    val: a.logic_score,        max:25 },
-                { label:'Creativity',      val: a.creativity_score,   max:15 },
-                { label:'Code Quality',    val: a.code_quality_score, max:10 }
+                { label:'Task Completion', val: a.task_match_score,   max:40 },
+                { label:'UI / UX',         val: a.ui_score,           max:20 },
+                { label:'Logic & Code',    val: a.logic_score,        max:20 },
+                { label:'Responsiveness',  val: a.code_quality_score, max:10 },
+                { label:'Creativity',      val: a.creativity_score,   max:10 }
             ];
             document.getElementById('eval-grid').innerHTML = breakdowns.map(function(b){
                 return '<div class="eval-cell"><div class="eval-cell-label">'+esc(b.label)+'</div><div class="eval-cell-val">'+(b.val!=null?b.val:'--')+'<span style="font-size:0.65rem;color:var(--text-sub);margin-left:2px;">/'+b.max+'</span></div></div>';
@@ -242,13 +266,22 @@
             showEvalPending();
             pollTimer = setInterval(async function(){
                 pollAttempts++;
-                if (pollAttempts > 30) { clearInterval(pollTimer); return; } // stop after ~2.5 min
+                if (pollAttempts > 36) {
+                    clearInterval(pollTimer);
+                    showEvalFailed('Evaluation is taking longer than expected. Your submission is safe. Please ask the coordinator to re-evaluate from the admin dashboard.');
+                    return;
+                }
                 try {
-                    var res = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
+                    var res = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                     var data = await res.json();
-                    if (data.success && data.assignment && (data.assignment.submission_status === 'Evaluated' || data.assignment.evaluation_status === 'Evaluated')) {
+                    if (!data.success || !data.assignment) return;
+                    var a = data.assignment;
+                    if (a.submission_status === 'Evaluated' || a.evaluation_status === 'Evaluated') {
                         clearInterval(pollTimer);
-                        showEvalResults(data.assignment);
+                        showEvalResults(a);
+                    } else if (a.evaluation_status === 'Failed') {
+                        clearInterval(pollTimer);
+                        showEvalFailed(a.ai_feedback || null);
                     }
                 } catch(e){}
             }, 5000); // poll every 5s
@@ -256,25 +289,32 @@
 
         async function loadAssignment() {
             try {
-                var res  = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
+                var res  = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                 var data = await res.json();
                 if (!res.ok || !data.success) {
                     document.getElementById('assignment-section').innerHTML = '<div class="state-card error">'+esc(data&&data.message?data.message:'Assignment not found.')+'</div>';
                     return;
                 }
                 var a = data.assignment;
+                // Cache so initGate can use without a second fetch
+                _assignmentData = a;
                 renderAssignment(a);
                 document.getElementById('submission-section').style.display = 'block';
 
                 if (a.submission_status === 'Evaluated' || a.evaluation_status === 'Evaluated') {
                     lockForm(a.github_repo, a.submitted_at, a.github_owner, a.github_repo_name);
                     showEvalResults(a);
-                } else if ((a.submission_status === 'Submitted') && a.github_repo) {
+                } else if (a.evaluation_status === 'Failed' && a.github_repo) {
+                    lockForm(a.github_repo, a.submitted_at, a.github_owner, a.github_repo_name);
+                    showEvalFailed(a.ai_feedback || null);
+                } else if (a.github_repo) {
+                    // Submitted, Queued, or Evaluating
                     lockForm(a.github_repo, a.submitted_at, a.github_owner, a.github_repo_name);
                     startPolling();
                 }
+                // Note: FizzBuzz gate polling is started automatically by the lockForm override above.
             } catch(e) {
-                document.getElementById('assignment-section').innerHTML = '<div class="state-card error">Unable to reach the server. Make sure the backend is running on localhost:3000.</div>';
+                document.getElementById('assignment-section').innerHTML = '<div class="state-card error">Unable to reach the server.</div>';
             }
         }
 
@@ -300,7 +340,7 @@
             stopSW();
 
             try {
-                var res  = await fetch('http://localhost:3000/api/submit-github', {
+                var res  = await fetch(API_BASE + '/api/submit-github', {
                     method: 'POST', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ participant_id: PARTICIPANT_ID, github_repo: url })
                 });
@@ -328,19 +368,21 @@
                 alertBox.style.display = 'block';
                 btn.disabled = false;
                 btn.textContent = 'Submit Link for Evaluation';
+                // Clear before restart to prevent duplicate interval accumulation
+                clearInterval(swInterval);
                 swInterval = setInterval(tick, 1000);
 
             } catch(err) {
                 alertBox.className = 'alert-box alert-error';
-                alertBox.innerText = 'Unable to reach the server. Make sure the backend is running on localhost:3000.';
+                alertBox.innerText = 'Unable to reach the server.';
                 alertBox.style.display = 'block';
                 btn.disabled = false;
                 btn.textContent = 'Submit Link for Evaluation';
+                // Clear before restart to prevent duplicate interval accumulation
+                clearInterval(swInterval);
                 swInterval = setInterval(tick, 1000);
             }
         });
-
-        loadAssignment();
 
         // ── FizzBuzz gate: polls /api/fizzbuzz/toggle every 3s after submission ──
         // Shows the ENTER FIZZBUZZ ROUND button live when coordinator toggles ON.
@@ -396,7 +438,7 @@
 
         async function checkFizzBuzzGate() {
             try {
-                var r    = await fetch('http://localhost:3000/api/fizzbuzz/toggle');
+                var r    = await fetch(API_BASE + '/api/fizzbuzz/toggle');
                 var data = await r.json();
                 if (!data.success) return;
                 updateFizzBuzzGateUI(data.fizzbuzz_open, data.status);
@@ -415,22 +457,9 @@
             }
         };
 
-        // On page load: if already submitted, show gate immediately and start polling
-        (async function initGate(){
-            try {
-                var res  = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
-                var data = await res.json();
-                if (data.success && data.assignment &&
-                    (data.assignment.submission_status === 'Submitted' ||
-                     data.assignment.submission_status === 'Evaluated') &&
-                    data.assignment.github_repo) {
-                    _fbGateActive = true;
-                    showFizzBuzzGate();
-                    checkFizzBuzzGate();
-                    _fbGateInterval = setInterval(checkFizzBuzzGate, 3000);
-                }
-            } catch(e){}
-        })();
+        // On page load: fetch assignment, render UI, and start FizzBuzz gate polling if needed.
+        // lockForm override (above) handles starting _fbGateInterval automatically when called.
+        loadAssignment();
     </script>
 </body>
 </html>

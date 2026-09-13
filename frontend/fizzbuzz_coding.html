@@ -107,6 +107,10 @@
     </div>
 
     <script>
+        var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '')
+            ? 'http://localhost:3000'
+            : '';
+
         var PARTICIPANT_ID   = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
         if (!PARTICIPANT_ID) {
             var _s = sessionStorage.getItem('imposterParticipant');
@@ -125,7 +129,7 @@
         var cv=document.getElementById('space-bg'),cx=cv.getContext('2d');
         function rC(){cv.width=window.innerWidth;cv.height=window.innerHeight;}rC();window.addEventListener('resize',rC);
         var st=[];for(var i=0;i<150;i++)st.push({x:Math.random()*cv.width,y:Math.random()*cv.height,r:Math.random()*1.8,c:['#fff','#ff1e43','#00f0ff','#6b21a8'][Math.floor(Math.random()*4)],s:Math.random()*0.5+0.1});
-        (function a(){cx.clearRect(0,0,cv.width,cx.height||cv.height);st.forEach(function(s){cx.beginPath();cx.arc(s.x,s.y,s.r,0,Math.PI*2);cx.fillStyle=s.c;cx.fill();s.y+=s.s;if(s.y>cv.height){s.y=0;s.x=Math.random()*cv.width;}});requestAnimationFrame(a);})();
+        (function a(){cx.clearRect(0,0,cv.width,cv.height);st.forEach(function(s){cx.beginPath();cx.arc(s.x,s.y,s.r,0,Math.PI*2);cx.fillStyle=s.c;cx.fill();s.y+=s.s;if(s.y>cv.height){s.y=0;s.x=Math.random()*cv.width;}});requestAnimationFrame(a);})();
 
         function fmtTime(s){ s=Math.max(0,s); var m=Math.floor(s/60),sec=s%60; return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0'); }
 
@@ -145,16 +149,11 @@
                     document.getElementById('code-area').disabled = true;
                     var dot = document.getElementById('live-dot');
                     dot.style.animation='none'; dot.style.backgroundColor='#c00d2e'; dot.style.boxShadow='none';
-                    // Persist finished to DB
-                    fetch('http://localhost:3000/api/event/finish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({eventKey:'fizzbuzz'})}).catch(function(){});
-        } else if (_tickCount % 10 === 0) {
-                    // Persist remaining_seconds directly — no pause/resume (avoids race conditions)
-                    fetch('http://localhost:3000/api/event/tick',{
-                        method:'POST',
-                        headers:{'Content-Type':'application/json'},
-                        body:JSON.stringify({eventKey:'fizzbuzz', remaining_seconds: remainingSecs})
-                    }).catch(function(){});
+                    // Note: timer state is authoritative on the server — the admin dashboard controls
+                    // start/pause/finish. We do NOT call admin-only /api/event/finish from here.
                 }
+                // Note: we do NOT call /api/event/tick from client — that is an admin-only operation.
+                // The server computes remaining time authoritatively from started_at.
             }, 1000);
         }
 
@@ -167,7 +166,7 @@
             try {
                 // 1. Check timer — fetch FIRST before checking remainingSecs
                 var loaded = false;
-                var tr = await fetch('http://localhost:3000/api/event-timers');
+                var tr = await fetch(API_BASE + '/api/event-timers');
                 var td = await tr.json();
                 if (td.success && td.timers){
                     var fb = td.timers.find(function(t){ return t.event_key==='fizzbuzz'; });
@@ -190,7 +189,7 @@
                 if (timerStatus === 'running') startCountdown();
 
                 // 2. Get participant info
-                var ar = await fetch('http://localhost:3000/api/fizzbuzz/status/'+PARTICIPANT_ID);
+                var ar = await fetch(API_BASE + '/api/fizzbuzz/status/'+PARTICIPANT_ID);
                 var ad = await ar.json();
 
                 document.getElementById('info-card').style.display = 'block';
@@ -206,7 +205,7 @@
                 if (!resolvedGroup) {
                     // Try my-assignment as last resort
                     try {
-                        var mr2 = await fetch('http://localhost:3000/api/my-assignment/'+PARTICIPANT_ID);
+                        var mr2 = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                         var md2 = await mr2.json();
                         if (md2.success && md2.assignment && md2.assignment.shuffled_group) {
                             resolvedGroup = md2.assignment.shuffled_group;
@@ -242,7 +241,7 @@
             clearInterval(lockPollInterval);
             lockPollInterval = setInterval(async function(){
                 try {
-                    var r = await fetch('http://localhost:3000/api/fizzbuzz/status/'+PARTICIPANT_ID);
+                    var r = await fetch(API_BASE + '/api/fizzbuzz/status/'+PARTICIPANT_ID);
                     var d = await r.json();
                     if (d.success && (d.group_submitted || d.fizzbuzz_locked)) {
                         clearInterval(lockPollInterval);
@@ -265,7 +264,7 @@
             btn.disabled = true; btn.textContent = 'SUBMITTING...';
             msg.style.display = 'none';
             try {
-                var res = await fetch('http://localhost:3000/api/fizzbuzz/submit-v2', {
+                var res = await fetch(API_BASE + '/api/fizzbuzz/submit-v2', {
                     method:'POST', headers:{'Content-Type':'application/json'},
                     body: JSON.stringify({
                         participant_id: PARTICIPANT_ID,
@@ -288,10 +287,11 @@
                     btn.textContent = 'SUBMITTED';
                     msg.style.display = 'block';
                     msg.className = 'status-msg';
+                    function esc2(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
                     msg.innerHTML = '&#10003; SOLUTION SUBMITTED SUCCESSFULLY!<br>'+
-                        '<strong>Group:</strong> '+(data.shuffled_group||'--')+'<br>'+
-                        '<strong>Submitted by:</strong> '+(data.submitted_by||'--')+'<br>'+
-                        '<strong>Language:</strong> '+lang+'<br><br>'+
+                        '<strong>Group:</strong> '+esc2(data.shuffled_group||'--')+'<br>'+
+                        '<strong>Submitted by:</strong> '+esc2(data.submitted_by||'--')+'<br>'+
+                        '<strong>Language:</strong> '+esc2(lang)+'<br><br>'+
                         'Submitted Successfully — Evaluation in Progress';
                     return;
                 }

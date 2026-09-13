@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASTHRA 2K26 — System Tester</title>
+<style>
+  :root {
+    --bg:#08070b; --surface:#16151d; --card:#1e1c28;
+    --border:#2d2840; --red:#ff1e43; --cyan:#00f0ff;
+    --green:#00ff66; --violet:#7c3aed; --amber:#f59e0b;
+    --text:#f0f0f0; --muted:#8b8b9e;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'Courier New',monospace;font-size:13px;min-height:100vh;}
+  .layout{display:flex;height:100vh;overflow:hidden;}
+  /* Sidebar */
+  .sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
+  .logo{padding:14px;border-bottom:1px solid var(--border);}
+  .logo h1{color:var(--red);font-size:11px;letter-spacing:2px;text-transform:uppercase;}
+  .logo p{color:var(--muted);font-size:9px;margin-top:3px;}
+  .cfg{padding:10px;border-bottom:1px solid var(--border);}
+  .cfg label{font-size:9px;color:var(--muted);letter-spacing:1px;display:block;margin-bottom:4px;}
+  .cfg input{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--cyan);font-family:'Courier New',monospace;font-size:11px;padding:5px 7px;border-radius:4px;outline:none;}
+  .cfg input:focus{border-color:var(--cyan);}
+  nav{flex:1;padding:8px;overflow-y:auto;}
+  .ns{font-size:9px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;padding:8px 6px 4px;}
+  .nb{width:100%;text-align:left;background:none;border:none;color:var(--muted);font-family:'Courier New',monospace;font-size:11px;padding:7px 10px;border-radius:5px;cursor:pointer;display:flex;align-items:center;gap:7px;transition:all 0.15s;}
+  .nb:hover{background:var(--card);color:var(--text);}
+  .nb.active{background:rgba(255,30,67,0.15);color:var(--red);border:1px solid rgba(255,30,67,0.3);}
+  .nb .dot{width:6px;height:6px;border-radius:50%;background:var(--muted);flex-shrink:0;}
+  .nb.active .dot{background:var(--red);box-shadow:0 0 6px var(--red);}
+  /* Main */
+  .main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+  .topbar{height:48px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex-shrink:0;}
+  .topbar-title{font-size:12px;letter-spacing:2px;text-transform:uppercase;}
+  .badge{font-size:9px;padding:2px 8px;border-radius:10px;font-weight:bold;letter-spacing:1px;}
+  .ok  {background:rgba(0,255,102,0.15);color:var(--green);border:1px solid rgba(0,255,102,0.3);}
+  .err {background:rgba(255,30,67,0.15);color:var(--red);border:1px solid rgba(255,30,67,0.3);}
+  .wait{background:rgba(0,240,255,0.1);color:var(--cyan);border:1px solid rgba(0,240,255,0.25);}
+  .warn{background:rgba(245,158,11,0.12);color:var(--amber);border:1px solid rgba(245,158,11,0.3);}
+  .content{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px;}
+  /* Cards */
+  .tc{background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px;}
+  .tc-h{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+  .tc-t{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;flex:1;}
+  .tc-b{padding:16px;display:flex;flex-direction:column;gap:12px;}
+  /* Fields */
+  .f{display:flex;flex-direction:column;gap:4px;}
+  .f label{font-size:9px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;}
+  .f input,.f select{background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'Courier New',monospace;font-size:12px;padding:8px 10px;border-radius:4px;outline:none;width:100%;transition:border-color 0.2s;}
+  .f input:focus,.f select:focus{border-color:var(--cyan);}
+  .f select option{background:var(--surface);}
+  .fr{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .fr3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  /* Buttons */
+  .btn{font-family:'Courier New',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;padding:8px 16px;border-radius:4px;cursor:pointer;border:1px solid;transition:all 0.15s;font-weight:bold;}
+  .btn:disabled{opacity:0.4;cursor:not-allowed;}
+  .br{display:flex;gap:8px;flex-wrap:wrap;}
+  .b-r{background:rgba(255,30,67,0.15);color:var(--red);border-color:rgba(255,30,67,0.4);}
+  .b-r:hover:not(:disabled){background:var(--red);color:#000;}
+  .b-c{background:rgba(0,240,255,0.1);color:var(--cyan);border-color:rgba(0,240,255,0.35);}
+  .b-c:hover:not(:disabled){background:var(--cyan);color:#000;}
+  .b-g{background:rgba(0,255,102,0.1);color:var(--green);border-color:rgba(0,255,102,0.3);}
+  .b-g:hover:not(:disabled){background:var(--green);color:#000;}
+  .b-a{background:rgba(245,158,11,0.1);color:var(--amber);border-color:rgba(245,158,11,0.3);}
+  .b-a:hover:not(:disabled){background:var(--amber);color:#000;}
+  .b-v{background:rgba(124,58,237,0.15);color:#c4b5fd;border-color:rgba(124,58,237,0.4);}
+  .b-v:hover:not(:disabled){background:var(--violet);color:#fff;}
+  /* Result */
+  .rl{font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:4px;}
+  .res{background:#0a0a10;border:1px solid var(--border);border-radius:4px;padding:10px 12px;font-size:11px;line-height:1.7;min-height:40px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto;}
+  .res.ok {border-color:rgba(0,255,102,0.35);color:var(--green);}
+  .res.err{border-color:rgba(255,30,67,0.35);color:#ff8fa0;}
+  .res.inf{border-color:rgba(0,240,255,0.25);color:var(--cyan);}
+  .res.wrn{border-color:rgba(245,158,11,0.3);color:var(--amber);}
+  /* Token box */
+  .tok{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:10px;color:var(--cyan);word-break:break-all;line-height:1.5;}
+  /* Info/warn boxes */
+  .ib{background:rgba(0,240,255,0.05);border:1px solid rgba(0,240,255,0.2);border-radius:4px;padding:8px 12px;font-size:11px;color:var(--cyan);line-height:1.6;}
+  .wb{background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:8px 12px;font-size:11px;color:var(--amber);line-height:1.6;}
+  hr{border:none;border-top:1px solid var(--border);margin:4px 0;}
+  /* Panels */
+  .panel{display:none;}
+  .panel.active{display:block;}
+  footer{text-align:center;color:var(--muted);font-size:10px;padding:12px;border-top:1px solid var(--border);flex-shrink:0;}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="logo"><h1>ASTHRA 2K26</h1><p>System Tester — Browser UI</p></div>
+  <div class="cfg">
+    <label>Backend URL</label>
+    <input id="cfg-base" value="http://localhost:3000">
+  </div>
+  <nav>
+    <div class="ns">Public</div>
+    <button class="nb active" onclick="show('health')"><span class="dot"></span>Health Check</button>
+    <button class="nb"        onclick="show('auth')"><span class="dot"></span>Participant Login</button>
+    <button class="nb"        onclick="show('assignment')"><span class="dot"></span>My Assignment</button>
+    <button class="nb"        onclick="show('github')"><span class="dot"></span>Submit GitHub</button>
+    <button class="nb"        onclick="show('fbp')"><span class="dot"></span>FizzBuzz (Participant)</button>
+    <button class="nb"        onclick="show('tpub')"><span class="dot"></span>Event Timers</button>
+    <div class="ns">Admin</div>
+    <button class="nb"        onclick="show('alog')"><span class="dot"></span>Admin Login</button>
+    <button class="nb"        onclick="show('reg')"><span class="dot"></span>Register Teams</button>
+    <button class="nb"        onclick="show('shuf')"><span class="dot"></span>Shuffle</button>
+    <button class="nb"        onclick="show('fba')"><span class="dot"></span>FizzBuzz (Admin)</button>
+    <button class="nb"        onclick="show('tadm')"><span class="dot"></span>Timer Control</button>
+    <button class="nb"        onclick="show('score')"><span class="dot"></span>Scoring</button>
+    <button class="nb"        onclick="show('ov')"><span class="dot"></span>Overview / Podium</button>
+    <div class="ns">Security</div>
+    <button class="nb"        onclick="show('sec')"><span class="dot"></span>Security Suite</button>
+  </nav>
+</aside>
+
+<!-- ── Main ── -->
+<div class="main">
+  <div class="topbar">
+    <span class="topbar-title" id="page-title">Health Check</span>
+    <span class="badge wait" id="global-status">Not tested</span>
+  </div>
+
+  <div class="content">
+
+    <!-- HEALTH -->
+    <div id="panel-health" class="panel active">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">GET /api/health</span><span class="badge wait" id="b-health">pending</span></div>
+        <div class="tc-b">
+          <div class="ib">Checks: server up, Supabase reachable, all required tables present.</div>
+          <div class="br">
+            <button class="btn b-c" onclick="testHealth()">Run Health Check</button>
+            <button class="btn b-c" onclick="testRoot()">GET / root</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-health">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUTH -->
+    <div id="panel-auth" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">POST /api/authenticate</span><span class="badge wait" id="b-auth">pending</span></div>
+        <div class="tc-b">
+          <div class="ib">Login as participant. UUID stored and auto-filled in all later tests.</div>
+          <div class="fr">
+            <div class="f"><label>Participant Name</label><input id="auth-name" placeholder="Alice"></div>
+            <div class="f"><label>Team Name</label><input id="auth-team" placeholder="Alpha"></div>
+          </div>
+          <div class="br">
+            <button class="btn b-r" onclick="testAuth()">Login</button>
+            <button class="btn b-a" onclick="testAuthBad()">Bad Credentials → expect 404</button>
+          </div>
+          <div class="rl">Stored participant_id</div>
+          <div class="tok" id="stored-pid">— none —</div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-auth">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ASSIGNMENT -->
+    <div id="panel-assignment" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">GET /api/my-assignment/:id</span><span class="badge wait" id="b-asgn">pending</span></div>
+        <div class="tc-b">
+          <div class="f"><label>Participant UUID (auto-filled from login)</label><input id="asgn-pid" placeholder="paste or login first"></div>
+          <div class="br">
+            <button class="btn b-c" onclick="testAssignment()">Fetch Assignment</button>
+            <button class="btn b-a" onclick="testAssignmentBadUUID()">Bad UUID → expect 400</button>
+            <button class="btn b-a" onclick="testAssignmentUnknown()">Unknown UUID → expect 404</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-asgn">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- GITHUB -->
+    <div id="panel-github" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">POST /api/submit-github</span><span class="badge wait" id="b-gh">pending</span></div>
+        <div class="tc-b">
+          <div class="wb">⚠ Uses stored participant_id. Use a real public repo for end-to-end AI evaluation test.</div>
+          <div class="f"><label>GitHub Repo URL</label><input id="gh-url" value="https://github.com/torvalds/linux"></div>
+          <div class="br"><button class="btn b-r" onclick="testGithubSubmit()">Submit Repo</button></div>
+          <hr>
+          <div class="rl">Blocked URL Tests — all must return 400</div>
+          <div class="br">
+            <button class="btn b-a" onclick="testBlockedUrl('http://localhost/evil')">localhost SSRF</button>
+            <button class="btn b-a" onclick="testBlockedUrl('http://169.254.169.254/meta')">AWS metadata</button>
+            <button class="btn b-a" onclick="testBlockedUrl('https://evil.com/u/repo')">non-GitHub</button>
+            <button class="btn b-a" onclick="testBlockedUrl('https://github.com/u/repo.git')">.git suffix</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-gh">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FIZZBUZZ PARTICIPANT -->
+    <div id="panel-fbp" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">FizzBuzz — Participant</span><span class="badge wait" id="b-fbp">pending</span></div>
+        <div class="tc-b">
+          <div class="br">
+            <button class="btn b-c" onclick="testFBToggle()">GET /api/fizzbuzz/toggle (is open?)</button>
+            <button class="btn b-c" onclick="testFBStatus()">GET /api/fizzbuzz/status/:id</button>
+          </div>
+          <hr>
+          <div class="f"><label>FizzBuzz Output (one entry per line, 1–15)</label>
+            <textarea id="fb-output" rows="4" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'Courier New',monospace;font-size:12px;padding:8px;border-radius:4px;outline:none;width:100%;resize:vertical;">1
+2
+Fizz
+4
+Buzz
+Fizz
+7
+8
+Fizz
+Buzz
+11
+Fizz
+13
+14
+FizzBuzz</textarea>
+          </div>
+          <div class="f"><label>Language</label>
+            <select id="fb-lang"><option>Python</option><option>JavaScript</option><option>Java</option><option>C++</option><option>Other</option></select>
+          </div>
+          <div class="br"><button class="btn b-r" onclick="testFBSubmit()">POST /api/fizzbuzz/submit-v2</button></div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-fbp">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PUBLIC TIMERS -->
+    <div id="panel-tpub" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">GET /api/event-timers (public)</span><span class="badge wait" id="b-tpub">pending</span></div>
+        <div class="tc-b">
+          <div class="br">
+            <button class="btn b-c" onclick="testPublicTimers()">All Timers</button>
+            <button class="btn b-c" onclick="testSingleTimer('main_event')">main_event</button>
+            <button class="btn b-c" onclick="testSingleTimer('fizzbuzz')">fizzbuzz</button>
+            <button class="btn b-c" onclick="testSingleTimer('code_imposter')">code_imposter</button>
+            <button class="btn b-c" onclick="testSingleTimer('sherlock')">sherlock</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-tpub">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN LOGIN -->
+    <div id="panel-alog" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">POST /api/admin/login</span><span class="badge wait" id="b-alog">pending</span></div>
+        <div class="tc-b">
+          <div class="f"><label>Admin Secret (from .env ADMIN_SECRET)</label>
+            <input id="admin-secret" type="password" placeholder="your_admin_secret">
+          </div>
+          <div class="br">
+            <button class="btn b-r" onclick="testAdminLogin()">Login as Admin</button>
+            <button class="btn b-a" onclick="testAdminLoginBad()">Wrong Secret → expect 401</button>
+            <button class="btn b-a" onclick="testAdminLoginEmpty()">Empty Secret → expect 401</button>
+          </div>
+          <div class="rl">Stored Admin Token</div>
+          <div class="tok" id="stored-token">— none —</div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-alog">Click to run…</div>
+        </div>
+      </div>
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">Unauthenticated Access — all expect 401</span></div>
+        <div class="tc-b">
+          <div class="br">
+            <button class="btn b-a" onclick="testNoAuth('/api/admin/overview','GET')">overview</button>
+            <button class="btn b-a" onclick="testNoAuth('/api/admin/participants','GET')">participants</button>
+            <button class="btn b-a" onclick="testNoAuth('/api/registered-teams','GET')">registered-teams</button>
+            <button class="btn b-a" onclick="testNoAuth('/api/start-shuffle','POST')">start-shuffle</button>
+            <button class="btn b-a" onclick="testNoAuth('/api/timers','GET')">timers</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-noauth">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- REGISTER -->
+    <div id="panel-reg" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">POST /api/register-team</span><span class="badge wait" id="b-reg">pending</span></div>
+        <div class="tc-b">
+          <div class="wb">Requires admin token from Admin Login tab.</div>
+          <div class="f"><label>Team Name</label><input id="reg-team" value="Alpha"></div>
+          <div class="f"><label>Members (comma-separated, exactly 4)</label>
+            <input id="reg-members" value="Alice, Bob, Carol, Dave">
+          </div>
+          <div class="br">
+            <button class="btn b-r" onclick="testRegisterTeam()">Register Team</button>
+            <button class="btn b-a" onclick="testRegister3()">3 Members → expect 400</button>
+            <button class="btn b-c" onclick="testGetTeams()">GET /api/registered-teams</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-reg">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SHUFFLE -->
+    <div id="panel-shuf" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">POST /api/start-shuffle</span><span class="badge wait" id="b-shuf">pending</span></div>
+        <div class="tc-b">
+          <div class="wb">Requires 6 teams × 4 members + tasks seeded in DB. Admin token required.</div>
+          <div class="br">
+            <button class="btn b-r"    onclick="testShuffle(false)">Run Shuffle</button>
+            <button class="btn b-v"    onclick="testShuffle(true)">Force Re-shuffle (wipes submissions)</button>
+            <button class="btn b-c"    onclick="testShuffleLayout()">GET /api/shuffle-layout</button>
+            <button class="btn b-a"    onclick="testUnlockShuffle()">Unlock Shuffle Lock</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-shuf">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FIZZBUZZ ADMIN -->
+    <div id="panel-fba" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">FizzBuzz — Admin</span><span class="badge wait" id="b-fba">pending</span></div>
+        <div class="tc-b">
+          <div class="br">
+            <button class="btn b-g" onclick="testFBToggleAdmin('on')">Toggle ON (open round)</button>
+            <button class="btn b-a" onclick="testFBToggleAdmin('off')">Toggle OFF (close round)</button>
+            <button class="btn b-c" onclick="testFBSubmissions()">GET Submissions</button>
+          </div>
+          <hr>
+          <div class="fr">
+            <div class="f"><label>Shuffled Group</label><input id="fb-group" value="Group 1"></div>
+            <div class="f"><label>Correct?</label>
+              <select id="fb-correct"><option value="true">Yes — correct</option><option value="false">No — wrong</option></select>
+            </div>
+          </div>
+          <div class="br"><button class="btn b-r" onclick="testFBScore()">POST /api/admin/fizzbuzz/score</button></div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-fba">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TIMER ADMIN -->
+    <div id="panel-tadm" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">POST /api/event/:action — Timer Control</span><span class="badge wait" id="b-tadm">pending</span></div>
+        <div class="tc-b">
+          <div class="f"><label>Event Key</label>
+            <select id="timer-key">
+              <option value="main_event">main_event</option>
+              <option value="fizzbuzz">fizzbuzz</option>
+              <option value="code_imposter">code_imposter</option>
+              <option value="sherlock">sherlock</option>
+            </select>
+          </div>
+          <div class="br">
+            <button class="btn b-g"  onclick="timerAction('start')">▶ Start</button>
+            <button class="btn b-a"  onclick="timerAction('pause')">⏸ Pause</button>
+            <button class="btn b-c"  onclick="timerAction('resume')">▶▶ Resume</button>
+            <button class="btn b-v"  onclick="timerAction('reset')">↺ Reset</button>
+            <button class="btn b-r"  onclick="timerAction('finish')">⏹ Finish</button>
+          </div>
+          <hr>
+          <div class="ib">Guard tests — verify invalid transitions are rejected.</div>
+          <div class="br">
+            <button class="btn b-a" onclick="timerDupeStart()">Start already-running → expect 400</button>
+            <button class="btn b-a" onclick="timerPausePaused()">Pause non-running → expect 400</button>
+          </div>
+          <div class="br">
+            <button class="btn b-c" onclick="testAdminTimers()">GET /api/timers (admin)</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-tadm">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCORING -->
+    <div id="panel-score" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">Scoring Endpoints</span><span class="badge wait" id="b-score">pending</span></div>
+        <div class="tc-b">
+          <div class="rl">Manual Event Score</div>
+          <div class="fr3">
+            <div class="f"><label>Event</label>
+              <select id="manual-event"><option>Code Imposter</option><option>Sherlock Holmes</option><option>Drawing</option></select>
+            </div>
+            <div class="f"><label>Original Team</label><input id="manual-team" value="Alpha"></div>
+            <div class="f"><label>Marks (0–100)</label><input id="manual-marks" type="number" value="80" min="0" max="100"></div>
+          </div>
+          <div class="br">
+            <button class="btn b-r" onclick="testManualScore()">POST /api/admin/manual-score</button>
+            <button class="btn b-c" onclick="testGetManualScores()">GET /api/admin/manual-scores</button>
+          </div>
+          <hr>
+          <div class="rl">Update Main Event Score</div>
+          <div class="fr">
+            <div class="f"><label>Participant UUID</label><input id="score-pid" placeholder="auto-filled from login"></div>
+            <div class="f"><label>Score (0–100)</label><input id="score-val" type="number" value="85" min="0" max="100"></div>
+          </div>
+          <div class="br">
+            <button class="btn b-r" onclick="testUpdateMainScore()">POST /api/admin/update-main-event-score</button>
+            <button class="btn b-c" onclick="testMyScores()">GET /api/my-scores/:id</button>
+          </div>
+          <hr>
+          <div class="br">
+            <button class="btn b-v" onclick="testUnlockSubmission()">Unlock Submission</button>
+            <button class="btn b-v" onclick="testReEval()">Trigger Re-Evaluation</button>
+            <button class="btn b-a" onclick="testRecoverEvals()">Recover Stuck Evals</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-score">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div id="panel-ov" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">Admin Overview / Podium / Progress</span><span class="badge wait" id="b-ov">pending</span></div>
+        <div class="tc-b">
+          <div class="br">
+            <button class="btn b-c" onclick="testOverview()">Overview</button>
+            <button class="btn b-c" onclick="testTeamScores()">Team Scores</button>
+            <button class="btn b-g" onclick="testPodium()">Podium</button>
+            <button class="btn b-c" onclick="testEventProgress()">Event Progress</button>
+            <button class="btn b-a" onclick="testAuditLog()">Audit Log</button>
+            <button class="btn b-c" onclick="testCISubmissions()">Code Imposter Submissions</button>
+          </div>
+          <div class="rl">Response</div>
+          <div class="res inf" id="r-ov">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECURITY -->
+    <div id="panel-sec" class="panel">
+      <div class="tc">
+        <div class="tc-h"><span class="tc-t">Security Suite — 20 automated checks</span><span class="badge wait" id="b-sec">pending</span></div>
+        <div class="tc-b">
+          <div class="ib">Runs all security assertions automatically. ✓ = expected status received. ✗ = unexpected.</div>
+          <div class="br"><button class="btn b-r" onclick="runSecuritySuite()">Run All Security Tests</button></div>
+          <div class="rl">Results</div>
+          <div class="res inf" id="r-sec" style="min-height:260px;">Click to run…</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+  <footer>ASTHRA 2K26 — System Tester | Made with IBM Bob</footer>
+</div><!-- /main -->
+</div><!-- /layout -->
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+var S = { token: null, pid: null };
+
+function base(){ return document.getElementById('cfg-base').value.trim().replace(/\/$/,''); }
+
+// ── Navigation ─────────────────────────────────────────────────────────────────
+var PANELS = ['health','auth','assignment','github','fbp','tpub',
+              'alog','reg','shuf','fba','tadm','score','ov','sec'];
+var TITLES = {health:'Health Check',auth:'Participant Login',assignment:'My Assignment',
+  github:'Submit GitHub',fbp:'FizzBuzz (Participant)',tpub:'Event Timers (Public)',
+  alog:'Admin Login',reg:'Register Teams',shuf:'Shuffle',fba:'FizzBuzz (Admin)',
+  tadm:'Timer Control',score:'Scoring',ov:'Overview / Podium',sec:'Security Suite'};
+
+function show(id) {
+  PANELS.forEach(function(p){
+    var el = document.getElementById('panel-'+p);
+    if(el) el.classList.toggle('active', p===id);
+  });
+  document.querySelectorAll('.nb').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('onclick')==="show('"+id+"')");
+  });
+  document.getElementById('page-title').textContent = TITLES[id]||id;
+}
+
+// ── HTTP helper ───────────────────────────────────────────────────────────────
+async function api(method, path, body, extraH) {
+  var headers = Object.assign({'Content-Type':'application/json'}, extraH||{});
+  var opts = {method, headers};
+  if(body !== undefined && method !== 'GET') opts.body = JSON.stringify(body);
+  try {
+    var res = await fetch(base()+path, opts);
+    var text = await res.text();
+    var data; try{ data=JSON.parse(text); }catch(_){ data=text; }
+    return {status:res.status, ok:res.ok, data};
+  } catch(e) {
+    return {status:0, ok:false, data:'Network error: '+e.message};
+  }
+}
+function adm(method, path, body){ return api(method, path, body, S.token?{'Authorization':'Bearer '+S.token}:{}); }
+
+// ── Display ───────────────────────────────────────────────────────────────────
+function render(rid, bid, r, checkStatus) {
+  var el = document.getElementById(rid);
+  var bg = document.getElementById(bid);
+  var txt = 'HTTP '+r.status+'\n'+(typeof r.data==='object'?JSON.stringify(r.data,null,2):r.data);
+  el.textContent = txt;
+
+  var pass, cls, bText, bCls;
+  if(checkStatus !== undefined) {
+    pass = r.status === checkStatus;
+    cls   = pass ? 'ok' : 'err';
+    bText = pass ? '✓ '+r.status+' PASS' : '✗ '+r.status+' FAIL';
+    bCls  = pass ? 'badge ok' : 'badge err';
+  } else {
+    cls   = r.ok ? 'ok' : (r.status<500?'wrn':'err');
+    bText = r.status+(r.ok?' OK':' ERR');
+    bCls  = r.ok ? 'badge ok' : 'badge err';
+  }
+  el.className = 'res '+cls;
+  if(bg){ bg.className=bCls; bg.textContent=bText; }
+}
+
+function syncPid(){
+  if(S.pid){
+    var a=document.getElementById('asgn-pid'), b=document.getElementById('score-pid');
+    if(a&&!a.value) a.value=S.pid;
+    if(b&&!b.value) b.value=S.pid;
+  }
+}
+setInterval(syncPid, 600);
+
+// ── HEALTH ────────────────────────────────────────────────────────────────────
+async function testHealth(){
+  var r=await api('GET','/api/health');
+  render('r-health','b-health',r);
+  var gs=document.getElementById('global-status');
+  gs.className='badge '+(r.ok?'ok':'err');
+  gs.textContent=r.ok?'Backend OK':'Backend ERROR';
+}
+async function testRoot(){ render('r-health','b-health',await api('GET','/')); }
+
+// ── AUTH ──────────────────────────────────────────────────────────────────────
+async function testAuth(){
+  var name=document.getElementById('auth-name').value.trim();
+  var team=document.getElementById('auth-team').value.trim();
+  var r=await api('POST','/api/authenticate',{name,team_name:team});
+  if(r.ok&&r.data&&r.data.user&&r.data.user.id){
+    S.pid=r.data.user.id;
+    document.getElementById('stored-pid').textContent=S.pid;
+    syncPid();
+  }
+  render('r-auth','b-auth',r);
+}
+async function testAuthBad(){ render('r-auth','b-auth',await api('POST','/api/authenticate',{name:'NOBODY_XYZ_',team_name:'NOPE_XYZ_'}),404); }
+
+// ── ASSIGNMENT ────────────────────────────────────────────────────────────────
+async function testAssignment(){
+  var id=document.getElementById('asgn-pid').value.trim()||S.pid;
+  if(!id){alert('Login first or paste a UUID.');return;}
+  render('r-asgn','b-asgn',await api('GET','/api/my-assignment/'+id));
+}
+async function testAssignmentBadUUID(){ render('r-asgn','b-asgn',await api('GET','/api/my-assignment/not-a-uuid'),400); }
+async function testAssignmentUnknown(){ render('r-asgn','b-asgn',await api('GET','/api/my-assignment/00000000-0000-0000-0000-000000000000'),404); }
+
+// ── GITHUB ────────────────────────────────────────────────────────────────────
+async function testGithubSubmit(){
+  var id=S.pid; if(!id){alert('Login first.');return;}
+  var url=document.getElementById('gh-url').value.trim();
+  render('r-gh','b-gh',await api('POST','/api/submit-github',{participant_id:id,github_repo:url}));
+}
+async function testBlockedUrl(url){
+  var id=S.pid||'00000000-0000-0000-0000-000000000000';
+  render('r-gh','b-gh',await api('POST','/api/submit-github',{participant_id:id,github_repo:url}),400);
+}
+
+// ── FIZZBUZZ PARTICIPANT ──────────────────────────────────────────────────────
+async function testFBToggle(){ render('r-fbp','b-fbp',await api('GET','/api/fizzbuzz/toggle')); }
+async function testFBStatus(){
+  var id=S.pid; if(!id){alert('Login first.');return;}
+  render('r-fbp','b-fbp',await api('GET','/api/fizzbuzz/status/'+id));
+}
+async function testFBSubmit(){
+  var id=S.pid; if(!id){alert('Login first.');return;}
+  var output=document.getElementById('fb-output').value;
+  var lang=document.getElementById('fb-lang').value;
+  render('r-fbp','b-fbp',await api('POST','/api/fizzbuzz/submit-v2',{participant_id:id,fizz_output:output,language:lang}));
+}
+
+// ── PUBLIC TIMERS ─────────────────────────────────────────────────────────────
+async function testPublicTimers(){ render('r-tpub','b-tpub',await api('GET','/api/event-timers')); }
+async function testSingleTimer(k){ render('r-tpub','b-tpub',await api('GET','/api/timer/'+k)); }
+
+// ── ADMIN LOGIN ───────────────────────────────────────────────────────────────
+async function testAdminLogin(){
+  var secret=document.getElementById('admin-secret').value;
+  var r=await api('POST','/api/admin/login',{secret});
+  if(r.ok&&r.data&&r.data.token){
+    S.token=r.data.token;
+    document.getElementById('stored-token').textContent=S.token;
+  }
+  render('r-alog','b-alog',r);
+}
+async function testAdminLoginBad(){ render('r-alog','b-alog',await api('POST','/api/admin/login',{secret:'wrongpassword_xyz'}),401); }
+async function testAdminLoginEmpty(){ render('r-alog','b-alog',await api('POST','/api/admin/login',{secret:''}),401); }
+async function testNoAuth(path,method){ render('r-noauth','b-alog',await api(method,path,method==='POST'?{}:undefined),401); }
+
+// ── REGISTER ──────────────────────────────────────────────────────────────────
+async function testRegisterTeam(){
+  if(!S.token){alert('Login as admin first.');return;}
+  var members=document.getElementById('reg-members').value.split(',').map(function(m){return m.trim();}).filter(Boolean);
+  render('r-reg','b-reg',await adm('POST','/api/register-team',{team_name:document.getElementById('reg-team').value.trim(),members}));
+}
+async function testRegister3(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-reg','b-reg',await adm('POST','/api/register-team',{team_name:'BadTeam',members:['A','B','C']}),400);
+}
+async function testGetTeams(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-reg','b-reg',await adm('GET','/api/registered-teams'));
+}
+
+// ── SHUFFLE ───────────────────────────────────────────────────────────────────
+async function testShuffle(force){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-shuf','b-shuf',await adm('POST','/api/start-shuffle',{force_reset:force}));
+}
+async function testShuffleLayout(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-shuf','b-shuf',await adm('GET','/api/shuffle-layout'));
+}
+async function testUnlockShuffle(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-shuf','b-shuf',await adm('POST','/api/admin/unlock-shuffle',{}));
+}
+
+// ── FIZZBUZZ ADMIN ────────────────────────────────────────────────────────────
+async function testFBToggleAdmin(action){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-fba','b-fba',await adm('POST','/api/admin/fizzbuzz/toggle',{action}));
+}
+async function testFBSubmissions(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-fba','b-fba',await adm('GET','/api/admin/fizzbuzz/submissions'));
+}
+async function testFBScore(){
+  if(!S.token){alert('Login as admin first.');return;}
+  var group=document.getElementById('fb-group').value.trim();
+  var is_correct=document.getElementById('fb-correct').value==='true';
+  render('r-fba','b-fba',await adm('POST','/api/admin/fizzbuzz/score',{shuffled_group:group,is_correct}));
+}
+
+// ── TIMER ADMIN ───────────────────────────────────────────────────────────────
+async function timerAction(action){
+  if(!S.token){alert('Login as admin first.');return;}
+  var key=document.getElementById('timer-key').value;
+  render('r-tadm','b-tadm',await adm('POST','/api/event/'+action,{eventKey:key}));
+}
+async function timerDupeStart(){
+  if(!S.token){alert('Login as admin first.');return;}
+  var key=document.getElementById('timer-key').value;
+  await adm('POST','/api/event/start',{eventKey:key});
+  render('r-tadm','b-tadm',await adm('POST','/api/event/start',{eventKey:key}),400);
+}
+async function timerPausePaused(){
+  if(!S.token){alert('Login as admin first.');return;}
+  var key=document.getElementById('timer-key').value;
+  await adm('POST','/api/event/reset',{eventKey:key});
+  render('r-tadm','b-tadm',await adm('POST','/api/event/pause',{eventKey:key}),400);
+}
+async function testAdminTimers(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-tadm','b-tadm',await adm('GET','/api/timers'));
+}
+
+// ── SCORING ───────────────────────────────────────────────────────────────────
+async function testManualScore(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-score','b-score',await adm('POST','/api/admin/manual-score',{
+    event_name:document.getElementById('manual-event').value,
+    original_team:document.getElementById('manual-team').value.trim(),
+    marks:Number(document.getElementById('manual-marks').value)
+  }));
+}
+async function testGetManualScores(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-score','b-score',await adm('GET','/api/admin/manual-scores'));
+}
+async function testUpdateMainScore(){
+  if(!S.token){alert('Login as admin first.');return;}
+  var id=document.getElementById('score-pid').value.trim()||S.pid;
+  if(!id){alert('Need a participant UUID.');return;}
+  render('r-score','b-score',await adm('POST','/api/admin/update-main-event-score',{participant_id:id,score:Number(document.getElementById('score-val').value)}));
+}
+async function testMyScores(){
+  var id=S.pid||document.getElementById('score-pid').value.trim();
+  if(!id){alert('Login first or paste UUID.');return;}
+  render('r-score','b-score',await api('GET','/api/my-scores/'+id));
+}
+async function testUnlockSubmission(){
+  if(!S.token){alert('Login as admin first.');return;}
+  var id=document.getElementById('score-pid').value.trim()||S.pid;
+  if(!id){alert('Need a participant UUID.');return;}
+  render('r-score','b-score',await adm('POST','/api/admin/unlock-submission',{participant_id:id}));
+}
+async function testReEval(){
+  if(!S.token){alert('Login as admin first.');return;}
+  var id=document.getElementById('score-pid').value.trim()||S.pid;
+  if(!id){alert('Need a participant UUID.');return;}
+  render('r-score','b-score',await adm('POST','/api/evaluate-submission/'+id,{}));
+}
+async function testRecoverEvals(){
+  if(!S.token){alert('Login as admin first.');return;}
+  render('r-score','b-score',await adm('POST','/api/admin/recover-evaluations',{}));
+}
+
+// ── OVERVIEW ──────────────────────────────────────────────────────────────────
+async function testOverview(){ if(!S.token){alert('Login as admin first.');return;} render('r-ov','b-ov',await adm('GET','/api/admin/overview')); }
+async function testTeamScores(){ if(!S.token){alert('Login as admin first.');return;} render('r-ov','b-ov',await adm('GET','/api/admin/team-scores')); }
+async function testPodium(){ if(!S.token){alert('Login as admin first.');return;} render('r-ov','b-ov',await adm('GET','/api/admin/podium')); }
+async function testEventProgress(){ if(!S.token){alert('Login as admin first.');return;} render('r-ov','b-ov',await adm('GET','/api/admin/event-progress')); }
+async function testAuditLog(){ if(!S.token){alert('Login as admin first.');return;} render('r-ov','b-ov',await adm('GET','/api/admin/audit-log')); }
+async function testCISubmissions(){ if(!S.token){alert('Login as admin first.');return;} render('r-ov','b-ov',await adm('GET','/api/admin/code-imposter-submissions')); }
+
+// ── SECURITY SUITE ────────────────────────────────────────────────────────────
+async function runSecuritySuite(){
+  var el=document.getElementById('r-sec');
+  var bg=document.getElementById('b-sec');
+  el.className='res inf'; el.textContent='Running 20 checks…\n';
+  var lines=[]; var pass=0,fail=0;
+  var D='00000000-0000-0000-0000-000000000000';
+
+  async function chk(label, promise, expected){
+    try{
+      var r=await promise;
+      var ok=r.status===expected;
+      ok?pass++:fail++;
+      lines.push((ok?'✓':'✗')+' ['+r.status+'] '+label+(ok?'':' (expected '+expected+')'));
+    }catch(e){
+      fail++;
+      lines.push('✗ [ERR] '+label+' — '+e.message);
+    }
+    el.textContent=lines.join('\n');
+  }
+
+  await chk('No token → overview 401',       api('GET','/api/admin/overview'), 401);
+  await chk('No token → participants 401',   api('GET','/api/admin/participants'), 401);
+  await chk('No token → registered-teams 401',api('GET','/api/registered-teams'), 401);
+  await chk('No token → start-shuffle 401',  api('POST','/api/start-shuffle',{}), 401);
+  await chk('No token → timers 401',         api('GET','/api/timers'), 401);
+  await chk('No token → podium 401',         api('GET','/api/admin/podium'), 401);
+  await chk('Wrong token → overview 401',    api('GET','/api/admin/overview',undefined,{'Authorization':'Bearer wrongtoken123'}), 401);
+  await chk('Empty bearer → overview 401',   api('GET','/api/admin/overview',undefined,{'Authorization':'Bearer '}), 401);
+  await chk('/api/health → 200',             api('GET','/api/health'), 200);
+  await chk('/api/event-timers → 200',       api('GET','/api/event-timers'), 200);
+  await chk('Bad UUID assignment → 400',     api('GET','/api/my-assignment/not-a-uuid'), 400);
+  await chk('Unknown UUID assignment → 404', api('GET','/api/my-assignment/'+D), 404);
+  await chk('Bad UUID submit-github → 400',  api('POST','/api/submit-github',{participant_id:'bad',github_repo:'https://github.com/a/b'}), 400);
+  await chk('SSRF localhost → 400',          api('POST','/api/submit-github',{participant_id:D,github_repo:'http://localhost/evil'}), 400);
+  await chk('SSRF 169.254 → 400',           api('POST','/api/submit-github',{participant_id:D,github_repo:'http://169.254.169.254/m'}), 400);
+  await chk('non-GitHub domain → 400',       api('POST','/api/submit-github',{participant_id:D,github_repo:'https://evil.com/u/r'}), 400);
+  await chk('.git suffix → 400',             api('POST','/api/submit-github',{participant_id:D,github_repo:'https://github.com/u/r.git'}), 400);
+  await chk('Wrong admin password → 401',    api('POST','/api/admin/login',{secret:'wrongpassword_xyz'}), 401);
+  await chk('Empty admin secret → 401',      api('POST','/api/admin/login',{secret:''}), 401);
+  await chk('Unknown route → 404',           api('GET','/api/xxxxxx-does-not-exist'), 404);
+
+  el.textContent=lines.join('\n')+'\n\n─── '+pass+' passed, '+fail+' failed ───';
+  el.className='res '+(fail===0?'ok':'err');
+  bg.className='badge '+(fail===0?'ok':'err');
+  bg.textContent=fail===0?'ALL PASS':fail+' FAILED';
+}
+</script>
+</body>
+</html>
