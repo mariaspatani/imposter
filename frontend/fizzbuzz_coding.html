@@ -124,6 +124,7 @@
         var timerInterval    = null;
         var remainingSecs    = 0;
         var timerStatus      = 'idle';
+        var _groupAlreadyLocked = false; // prevents starting lockPollInterval when already submitted on load
 
         // Space bg
         var cv=document.getElementById('space-bg'),cx=cv.getContext('2d');
@@ -143,17 +144,14 @@
                 document.getElementById('timer-display').innerText = fmtTime(remainingSecs);
                 if (remainingSecs <= 0){
                     clearInterval(timerInterval);
+                    clearInterval(lockPollInterval); // stop polling once time expires
                     document.getElementById('timer-display').className = 'timer-display expired';
                     document.getElementById('state-expired').style.display = 'block';
                     document.getElementById('submit-btn').disabled = true;
                     document.getElementById('code-area').disabled = true;
                     var dot = document.getElementById('live-dot');
                     dot.style.animation='none'; dot.style.backgroundColor='#c00d2e'; dot.style.boxShadow='none';
-                    // Note: timer state is authoritative on the server — the admin dashboard controls
-                    // start/pause/finish. We do NOT call admin-only /api/event/finish from here.
                 }
-                // Note: we do NOT call /api/event/tick from client — that is an admin-only operation.
-                // The server computes remaining time authoritatively from started_at.
             }, 1000);
         }
 
@@ -178,8 +176,9 @@
                     }
                 }
 
-                // Only show expired AFTER we've loaded timer data, and status is truly finished
-                if (loaded && (timerStatus === 'finished' || (remainingSecs <= 0 && timerStatus !== 'running' && timerStatus !== 'paused'))){
+                // Only show expired if status is 'finished' OR the timer was running and ran out.
+                // Do NOT show expired for 'idle' or 'paused' states even if remaining_seconds is 0.
+                if (loaded && (timerStatus === 'finished' || (remainingSecs <= 0 && timerStatus === 'running'))){
                     document.getElementById('timer-display').className = 'timer-display expired';
                     document.getElementById('state-expired').style.display = 'block';
                     document.getElementById('form-panel').style.display = 'none';
@@ -220,12 +219,15 @@
                     if (groupSel) groupSel.style.display = 'none';
                     localStorage.setItem('fizzbuzz_group', resolvedGroup);
                 } else {
-                    groupEl.style.display = 'none';
-                    if (groupSel) groupSel.style.display = 'inline-block';
+                    // All resolution attempts failed — disable submit and show error
+                    groupEl.innerText = 'ERROR: Contact coordinator';
+                    groupEl.style.color = 'var(--crimson-red)';
+                    document.getElementById('submit-btn').disabled = true;
                 }
 
                 // Already locked — group submitted
                 if (ad.success && (ad.group_submitted || ad.fizzbuzz_locked)){
+                    _groupAlreadyLocked = true; // prevent startLockPoll from being called
                     document.getElementById('locked-notice').innerText = '\uD83D\uDD12 Submitted Successfully — Evaluation in Progress';
                     document.getElementById('locked-notice').style.display = 'block';
                     document.getElementById('fizzbuzz-form').style.display = 'none';
@@ -283,6 +285,7 @@
                 }
                 if (res.ok && data.success){
                     clearInterval(timerInterval);
+                    clearInterval(lockPollInterval); // stop group-lock polling — submission done
                     disableForm();
                     btn.textContent = 'SUBMITTED';
                     msg.style.display = 'block';
@@ -308,8 +311,9 @@
         }
 
         loadPage();
-        // Start lock-polling after load to detect when another group member submits
-        setTimeout(function(){ startLockPoll(); }, 3000);
+        // Start lock-polling after load to detect when another group member submits.
+        // Skip if group was already locked when the page loaded.
+        setTimeout(function(){ if (!_groupAlreadyLocked) startLockPoll(); }, 3000);
     </script>
 </body>
 </html>

@@ -102,17 +102,25 @@ async function processEvaluation(supabase, participantId, options = {}) {
   const runtimeEvaluator = getRuntimeEvaluator();
 
   try {
-    // Run runtime evaluation if available (graceful degradation)
+    // Step 1: Download the repository source code once — shared by both runtime and AI evaluation.
+    const { downloadAndReadRepo } = require('../githubRepo');
+    let sourceCode;
+    try {
+      sourceCode = await downloadAndReadRepo(asgn.github_repo);
+    } catch (dlErr) {
+      // Repo download failed — nothing more we can do; surface the error so the admin can see it.
+      throw new Error('Failed to download GitHub repository: ' + dlErr.message);
+    }
+
+    // Step 2: Run runtime evaluation if available (graceful degradation — never blocks AI scoring).
     let runtimeEvidence = null;
     try {
-      const { downloadAndReadRepo } = require('../githubRepo');
-      const sourceCode = await downloadAndReadRepo(asgn.github_repo);
       runtimeEvidence = await runtimeEvaluator.evaluate({ assignment: asgn, sourceCode });
-      logEvent('RUNTIME_EVALUATION', { 
-        participantId, 
+      logEvent('RUNTIME_EVALUATION', {
+        participantId,
         available: runtimeEvidence.runtime_available,
         mode: runtimeEvidence.runtime_mode,
-        duration_ms: runtimeEvidence.runtime_duration_ms 
+        duration_ms: runtimeEvidence.runtime_duration_ms
       });
     } catch (runtimeErr) {
       console.warn('[Runtime] Runtime evaluation failed, falling back to static-only:', runtimeErr.message);
@@ -123,10 +131,12 @@ async function processEvaluation(supabase, participantId, options = {}) {
       };
     }
 
-    const result = await provider.evaluateSubmission({ 
-      assignment: asgn, 
+    // Step 3: AI evaluation — pass the already-downloaded sourceCode so we don't re-download.
+    const result = await provider.evaluateSubmission({
+      assignment: asgn,
       criteria,
-      runtimeEvidence 
+      runtimeEvidence,
+      sourceCode,
     });
     const scorePatch = toAssignmentColumns(result, criteria);
     const fizz = Number(asgn.fizzbuzz_score || 0);
