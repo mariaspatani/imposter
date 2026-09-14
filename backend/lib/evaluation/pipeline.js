@@ -136,8 +136,7 @@ async function processEvaluation(supabase, participantId, options = {}) {
 
     const { error: updErr } = await supabase.from('main_event_assignments').update({
       ...scorePatch,
-      total_score: result.total,
-      total_individual_score: totalIndividual,
+      total_score: totalIndividual,
       evaluation_status: 'Evaluated',
       submission_status: 'Evaluated',
     }).eq('participant_id', participantId);

@@ -16,9 +16,9 @@ const SKIP_PATTERNS = [
 ];
 
 const MAX_ARCHIVE_BYTES  = 30 * 1024 * 1024;
-const MAX_TOTAL_CHARS    = 120_000;
-const MAX_CHARS_PER_FILE = 8_000;
-const MAX_FILE_COUNT     = 200;
+const MAX_TOTAL_CHARS    = 24_000;
+const MAX_CHARS_PER_FILE = 4_000;
+const MAX_FILE_COUNT     = 50;
 
 function shouldSkip(entryName) {
   return SKIP_PATTERNS.some(p => entryName.includes(p));
