@@ -35,17 +35,21 @@
         .panel { background:rgba(22,21,29,0.85); border:2px solid var(--violet); border-radius:12px; padding:25px; box-shadow:0 0 15px rgba(107,33,168,0.3); position:relative; overflow:hidden; backdrop-filter:blur(5px); }
         .panel::before { content:''; position:absolute; top:0; left:0; width:100%; height:4px; background:linear-gradient(90deg,var(--cherry-red),var(--violet),var(--deep-blue)); }
         .panel-title { font-family:'Orbitron',sans-serif; color:var(--crimson-red); font-size:1.8rem; margin-bottom:20px; display:flex; align-items:center; gap:10px; }
-        .stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:15px; text-align:center; }
-        .stat-card { background:rgba(13,27,42,0.8); border:1px solid var(--cherry-red); border-radius:8px; padding:15px 10px; transition:transform 0.2s; }
+        
+        /* Fixed Stats Grid Layout & Scaling */
+        .stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:15px; text-align:center; align-items:stretch; }
+        .stat-card { background:rgba(13,27,42,0.8); border:1px solid var(--cherry-red); border-radius:8px; padding:15px 10px; transition:transform 0.2s; display:flex; flex-direction:column; justify-content:center; align-items:center; }
         .stat-card:hover { transform:translateY(-5px); border-color:var(--cyan-accent); }
-        .stat-value { font-family:'Orbitron',sans-serif; font-size:1.5rem; font-weight:bold; color:var(--cyan-accent); }
+        .stat-value { font-family:'Orbitron',sans-serif; font-size:clamp(0.95rem, 1.8vw, 1.4rem); font-weight:bold; color:var(--cyan-accent); line-height:1.2; word-break:break-word; }
         .stat-label { font-size:0.85rem; text-transform:uppercase; color:#aaa; margin-top:5px; }
+        
         .crewmate-svg { width:35px; height:45px; display:inline-block; vertical-align:middle; }
         .rules-list { list-style:none; counter-reset:rule-counter; display:flex; flex-direction:column; gap:12px; }
         .rules-list>li { counter-increment:rule-counter; position:relative; padding-left:35px; font-size:1.1rem; line-height:1.5; color:#e0e0e0; }
         .rules-list>li::before { content:counter(rule-counter)"."; position:absolute; left:0; top:0; font-family:'Orbitron',sans-serif; font-weight:bold; color:var(--cyan-accent); font-size:1.1rem; }
         .rules-list ul { list-style-type:disc; margin-top:8px; padding-left:20px; color:#bbb; }
         .rules-list ul li { margin-bottom:5px; }
+        
         /* Auth Modal */
         .modal-overlay { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(8,7,11,0.85); backdrop-filter:blur(8px); z-index:1000; justify-content:center; align-items:center; }
         .auth-card { background:var(--dark-grey); border:2px solid var(--crimson-red); border-radius:12px; padding:35px; width:90%; max-width:450px; box-shadow:0 0 25px rgba(255,30,67,0.3); position:relative; }
@@ -59,38 +63,42 @@
         .submit-auth-btn { width:100%; background:linear-gradient(90deg,var(--crimson-red),var(--cherry-red)); color:#fff; font-family:'Orbitron',sans-serif; font-size:1rem; font-weight:900; padding:12px; border:none; border-radius:50px; cursor:pointer; letter-spacing:2px; box-shadow:0 0 15px rgba(255,30,67,0.4); transition:transform 0.2s ease,opacity 0.2s ease; }
         .submit-auth-btn:hover { transform:scale(1.02); }
         .submit-auth-btn:disabled { opacity:0.55; cursor:not-allowed; transform:none; }
+        
         /* Response messages */
-        .response-box     { display:none; margin-top:15px; padding:12px; border-radius:6px; font-family:'Orbitron',sans-serif; text-align:center; font-size:0.82rem; line-height:1.5; }
-        .response-error   { background:rgba(255,30,67,0.1);  border:1px solid rgba(255,30,67,0.45);  color:#ffbfd0; }
-        .response-warning { background:rgba(255,190,0,0.08); border:1px solid rgba(255,190,0,0.4);   color:#ffe99a; }
+        .response-box { display:none; margin-top:15px; padding:12px; border-radius:6px; font-family:'Orbitron',sans-serif; text-align:center; font-size:0.82rem; line-height:1.5; }
+        .response-error { background:rgba(255,30,67,0.1); border:1px solid rgba(255,30,67,0.45); color:#ffbfd0; }
+        .response-warning { background:rgba(255,190,0,0.08); border:1px solid rgba(255,190,0,0.4); color:#ffe99a; }
+        
         /* Footer */
         footer { margin-top:40px; background:var(--dark-grey); border-top:1px solid var(--violet); padding:20px 5%; text-align:center; }
         .coordinators { display:flex; justify-content:center; gap:40px; flex-wrap:wrap; margin-top:10px; }
         .coord-card { font-size:1rem; color:#ddd; }
         .coord-card strong { color:var(--crimson-red); }
+        
         /* Emergency */
         .emergency-btn { position:fixed; bottom:20px; right:20px; background:#ff0000; color:white; border:3px solid #000; border-radius:50px; padding:12px 20px; font-family:'Orbitron',sans-serif; font-weight:900; cursor:pointer; box-shadow:0 0 15px rgba(255,0,0,0.8); animation:emergencyPulse 1.5s infinite; z-index:99; }
         @keyframes emergencyPulse { 0%{transform:scale(1)} 50%{transform:scale(1.08)} 100%{transform:scale(1)} }
+        
         /* Role Reveal */
         #role-reveal { display:none; position:fixed; inset:0; z-index:2000; justify-content:center; align-items:center; flex-direction:column; text-align:center; padding:30px 20px; }
         #role-reveal.active { display:flex; animation:revealFadeIn 0.45s ease both; }
         @keyframes revealFadeIn { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
         #role-reveal::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.08) 3px,rgba(0,0,0,0.08) 4px); pointer-events:none; z-index:0; }
         #role-reveal>* { position:relative; z-index:1; }
-        #role-reveal.imposter  { background:radial-gradient(ellipse at center,#2e0008 0%,#0a0003 100%); }
+        #role-reveal.imposter { background:radial-gradient(ellipse at center,#2e0008 0%,#0a0003 100%); }
         #role-reveal.specialist { background:radial-gradient(ellipse at center,#001f0a 0%,#000d04 100%); }
         .reveal-icon { font-size:5.5rem; margin-bottom:16px; line-height:1; animation:iconPop 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.15s both; }
         @keyframes iconPop { from{transform:scale(0.3);opacity:0} to{transform:scale(1);opacity:1} }
         .reveal-role-label { font-family:'Orbitron',sans-serif; font-size:clamp(1.7rem,6vw,3.2rem); font-weight:900; letter-spacing:3px; text-transform:uppercase; line-height:1.15; margin-bottom:22px; animation:textSlideUp 0.4s ease 0.3s both; }
         @keyframes textSlideUp { from{transform:translateY(18px);opacity:0} to{transform:translateY(0);opacity:1} }
-        #role-reveal.imposter  .reveal-role-label { color:#ff1e43; text-shadow:0 0 20px rgba(255,30,67,1),0 0 50px rgba(255,30,67,0.55),0 0 100px rgba(255,30,67,0.25); }
+        #role-reveal.imposter .reveal-role-label { color:#ff1e43; text-shadow:0 0 20px rgba(255,30,67,1),0 0 50px rgba(255,30,67,0.55),0 0 100px rgba(255,30,67,0.25); }
         #role-reveal.specialist .reveal-role-label { color:#00ff66; text-shadow:0 0 20px rgba(0,255,102,1),0 0 50px rgba(0,255,102,0.55),0 0 100px rgba(0,255,102,0.25); }
         .reveal-warning { font-family:'Orbitron',sans-serif; font-size:clamp(0.7rem,2vw,0.9rem); letter-spacing:2px; text-transform:uppercase; padding:10px 24px; border-radius:8px; margin-bottom:40px; animation:textSlideUp 0.4s ease 0.45s both; }
-        #role-reveal.imposter  .reveal-warning { color:#ffbfd0; background:rgba(255,30,67,0.1);   border:1px solid rgba(255,30,67,0.35); }
+        #role-reveal.imposter .reveal-warning { color:#ffbfd0; background:rgba(255,30,67,0.1); border:1px solid rgba(255,30,67,0.35); }
         #role-reveal.specialist .reveal-warning { color:#b5f5d5; background:rgba(0,255,102,0.07); border:1px solid rgba(0,255,102,0.3); }
         .reveal-actions { display:flex; flex-direction:column; align-items:center; gap:14px; animation:textSlideUp 0.4s ease 0.55s both; }
         .reveal-continue-btn { font-family:'Orbitron',sans-serif; font-size:0.85rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; padding:13px 40px; border-radius:50px; border:none; cursor:pointer; transition:transform 0.15s ease,box-shadow 0.15s ease; }
-        #role-reveal.imposter  .reveal-continue-btn { background:linear-gradient(90deg,#c00d2e,#ff1e43); color:#fff; box-shadow:0 0 20px rgba(255,30,67,0.5); }
+        #role-reveal.imposter .reveal-continue-btn { background:linear-gradient(90deg,#c00d2e,#ff1e43); color:#fff; box-shadow:0 0 20px rgba(255,30,67,0.5); }
         #role-reveal.specialist .reveal-continue-btn { background:linear-gradient(90deg,#00a83a,#00ff66); color:#001a09; box-shadow:0 0 20px rgba(0,255,102,0.45); }
         .reveal-continue-btn:hover { transform:translateY(-2px) scale(1.04); }
         .reveal-countdown { font-family:'Orbitron',sans-serif; font-size:0.78rem; letter-spacing:2px; color:rgba(255,255,255,0.38); text-transform:uppercase; }
@@ -118,7 +126,7 @@
             <div class="stats-grid">
                 <div class="stat-card"><div class="stat-value">18 SEP</div><div class="stat-label">SEPTEMBER 2026</div></div>
                 <div class="stat-card"><div class="stat-value">10:00 AM</div><div class="stat-label">TO 1:00 PM</div></div>
-                <div class="stat-card"><div class="stat-value">PROG LAB 2</div><div class="stat-label">VENUE: ECE DEPT</div></div>
+                <div class="stat-card"><div class="stat-value">Software Computing Lab</div><div class="stat-label">VENUE: MTB 115</div></div>
                 <div class="stat-card"><div class="stat-value">&#8377;300</div><div class="stat-label">REG FEE / TEAM</div></div>
                 <div class="stat-card"><div class="stat-value">4</div><div class="stat-label">MEMBERS</div></div>
             </div>
@@ -302,10 +310,8 @@
 
                 var data = await response.json();
 
-                // Success: show role reveal
                 if (response.ok && data && data.success === true) {
                     var user = data.user || {};
-                    // Persist participant identity — participant_id is the key used by main_event_page
                     if (user.id) {
                         localStorage.setItem('participant_id',   String(user.id));
                         sessionStorage.setItem('participant_id', String(user.id));
@@ -332,7 +338,6 @@
                     return;
                 }
 
-                // 403: shuffle not run yet — event has not started
                 if (response.status === 403) {
                     var waitMsg = (data && data.message) ? data.message : 'The event has not started yet. Please wait for the coordinator.';
                     resBox.className     = 'response-box response-warning';
@@ -341,7 +346,6 @@
                     return;
                 }
 
-                // 404 / other: invalid credentials
                 var errMsg = (data && data.message) ? data.message : 'Invalid Team or Participant Name.';
                 resBox.className     = 'response-box response-error';
                 resBox.textContent   = errMsg;

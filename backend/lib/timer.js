@@ -20,20 +20,21 @@ function durationSeconds(t) {
   return (t && t.duration_minutes ? t.duration_minutes : 15) * 60;
 }
 
-function computeRemaining(t, nowMs = Date.now()) {
+function computeRemaining(t, nowMs) {
+  const currentNow = (typeof nowMs === 'number' && nowMs > 100000000000) ? nowMs : Date.now();
   if (!t) return 0;
   if (t.status === 'finished') return 0;
 
   if (t.status === 'running') {
     if (t.ends_at) {
-      return Math.max(0, Math.floor((new Date(t.ends_at).getTime() - nowMs) / 1000));
+      return Math.max(0, Math.floor((new Date(t.ends_at).getTime() - currentNow) / 1000));
     }
     if (t.started_at) {
       const full = durationSeconds(t);
       const stored = (t.remaining_seconds != null && t.remaining_seconds > 0)
         ? Number(t.remaining_seconds)
         : full;
-      const runningFor = Math.floor((nowMs - new Date(t.started_at).getTime()) / 1000);
+      const runningFor = Math.floor((currentNow - new Date(t.started_at).getTime()) / 1000);
       return Math.max(0, stored - runningFor);
     }
     return durationSeconds(t);
@@ -150,8 +151,9 @@ function applyTimerAction(t, action, extraPayload = {}, nowMs = Date.now()) {
   return { ok: false, message: 'Unknown timer action.' };
 }
 
-function normaliseTimer(t, nowMs = Date.now()) {
-  const remaining = computeRemaining(t, nowMs);
+function normaliseTimer(t, nowMs) {
+  const currentNow = (typeof nowMs === 'number' && nowMs > 100000000000) ? nowMs : Date.now();
+  const remaining = computeRemaining(t, currentNow);
   const expired = t.status === 'running' && remaining <= 0;
   const status = expired ? 'finished' : (t.status || 'idle');
   return {
@@ -165,7 +167,7 @@ function normaliseTimer(t, nowMs = Date.now()) {
     started_at:        t.started_at,
     paused_at:         t.paused_at,
     ends_at:           t.ends_at || null,
-    server_time:       new Date(nowMs).toISOString(),
+    server_time:       new Date(currentNow).toISOString(),
   };
 }
 
