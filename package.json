@@ -1,0 +1,11 @@
+{
+  "name": "asthra-imposter",
+  "version": "1.0.0",
+  "description": "ASTHRA 2K26 - IMPOSTER",
+  "scripts": {
+    "install:backend": "npm install --prefix backend",
+    "postinstall": "npm install --prefix backend",
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js"
+  }
+}

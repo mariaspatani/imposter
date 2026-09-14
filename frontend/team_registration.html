@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -298,6 +298,95 @@
 
         .shuffle-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 
+        .shuffle-status-card {
+            background: rgba(15, 23, 38, 0.9);
+            border: 1px solid rgba(158, 178, 214, 0.28);
+            border-radius: 12px;
+            padding: 14px 18px;
+            margin-bottom: 16px;
+        }
+
+        .shuffle-status-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .shuffle-status-label {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.72rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .shuffle-status-badge {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.68rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: 1px solid;
+        }
+
+        .shuffle-status-badge.unlocked {
+            background: rgba(85, 230, 165, 0.12);
+            border-color: rgba(85, 230, 165, 0.45);
+            color: #b5f5d5;
+            box-shadow: 0 0 12px rgba(85, 230, 165, 0.25);
+        }
+
+        .shuffle-status-badge.locked {
+            background: rgba(255, 77, 109, 0.12);
+            border-color: rgba(255, 77, 109, 0.45);
+            color: #ffbfd0;
+            box-shadow: 0 0 12px rgba(255, 77, 109, 0.25);
+        }
+
+        .shuffle-lock-sub {
+            margin: 8px 0 0;
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+
+        .lock-btn, .unlock-btn {
+            border: none;
+            border-radius: 12px;
+            padding: 14px 26px;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+        }
+
+        .lock-btn {
+            background: rgba(85, 230, 165, 0.12);
+            color: #b5f5d5;
+            border: 1px solid rgba(85, 230, 165, 0.45);
+        }
+
+        .lock-btn:hover { transform: translateY(-1px); box-shadow: 0 0 18px rgba(85, 230, 165, 0.35); }
+
+        .unlock-btn {
+            background: rgba(255, 77, 109, 0.12);
+            color: #ffbfd0;
+            border: 1px solid rgba(255, 77, 109, 0.45);
+        }
+
+        .unlock-btn:hover { transform: translateY(-1px); box-shadow: 0 0 18px rgba(255, 77, 109, 0.35); }
+
+        .submit-btn:disabled, .secondary-btn:disabled, .lock-btn:disabled, .unlock-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
         .seating-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
 
         .group-card {
@@ -585,9 +674,20 @@
 
                 <section id="imposter-shuffle" class="panel-section">
                     <h2 class="panel-title">Imposter Shuffle</h2>
+
+                    <div class="shuffle-status-card">
+                        <div class="shuffle-status-row">
+                            <span class="shuffle-status-label">Status:</span>
+                            <span id="shuffle-lock-badge" class="shuffle-status-badge">…</span>
+                        </div>
+                        <p id="shuffle-lock-msg" class="shuffle-lock-sub"></p>
+                    </div>
+
                     <div class="shuffle-actions">
                         <button id="shuffle-all-btn" type="button" class="submit-btn">Shuffle All Teams</button>
-                        <button id="retry-shuffle-btn" type="button" class="secondary-btn">Retry Shuffle (Testing)</button>
+                        <button id="retry-shuffle-btn" type="button" class="secondary-btn">Retry Shuffle</button>
+                        <button id="lock-shuffle-btn" type="button" class="lock-btn">&#128274; Lock Shuffle</button>
+                        <button id="unlock-shuffle-btn" type="button" class="unlock-btn" style="display:none;">&#128275; Unlock Shuffle</button>
                     </div>
                     <div id="shuffle-status" class="response-box"></div>
                 </section>
@@ -647,6 +747,7 @@
                     document.getElementById('login-modal').style.display = 'none';
                     loadRegisteredTeams();
                     loadSeatingArrangement();
+                    loadShuffleStatus();
                 } else {
                     errEl.textContent = d.message || 'Invalid secret.';
                     errEl.style.display = 'block';
@@ -802,8 +903,104 @@
                 });
                 if (button.dataset.section === 'seating-arrangement') loadSeatingArrangement();
                 if (button.dataset.section === 'registered-teams') loadRegisteredTeams();
+                if (button.dataset.section === 'imposter-shuffle') loadShuffleStatus();
             });
         });
+
+        /* ── Shuffle lock status ── */
+        let currentShuffleLocked = false;
+
+        async function loadShuffleStatus() {
+            try {
+                const r = await fetch(API_BASE + '/api/admin/shuffle-status', { headers: authHeaders() });
+                const d = await r.json();
+                if (d.success) applyShuffleLockUI(d.is_locked, d.locked_at);
+            } catch (e) {}
+        }
+
+        function applyShuffleLockUI(isLocked, lockedAt) {
+            currentShuffleLocked = !!isLocked;
+
+            const badge    = document.getElementById('shuffle-lock-badge');
+            const msg      = document.getElementById('shuffle-lock-msg');
+            const btnAll   = document.getElementById('shuffle-all-btn');
+            const btnRetry = document.getElementById('retry-shuffle-btn');
+            const btnLock  = document.getElementById('lock-shuffle-btn');
+            const btnUnlock = document.getElementById('unlock-shuffle-btn');
+
+            if (badge) {
+                badge.textContent = isLocked ? '&#128274; LOCKED' : '&#128275; UNLOCKED';
+                badge.className = 'shuffle-status-badge ' + (isLocked ? 'locked' : 'unlocked');
+            }
+            if (msg) {
+                if (isLocked) {
+                    msg.textContent = lockedAt ? 'Locked at ' + new Date(lockedAt).toLocaleString() : 'Shuffle is locked. No further shuffles allowed until unlocked.';
+                } else {
+                    msg.textContent = 'Reshuffling is allowed. Run shuffle as many times as needed before locking.';
+                }
+            }
+            if (btnAll)   { btnAll.disabled   = isLocked; }
+            if (btnRetry) { btnRetry.disabled = isLocked; }
+            if (btnLock)  { btnLock.style.display  = isLocked ? 'none'   : 'inline-block'; }
+            if (btnUnlock){ btnUnlock.style.display = isLocked ? 'inline-block' : 'none'; }
+
+            // Also update button state based on teams + lock combined
+            if (typeof currentTeamsCache !== 'undefined') updateShuffleButtonState(currentTeamsCache);
+        }
+
+        async function doLockShuffle() {
+            const btn = document.getElementById('lock-shuffle-btn');
+            const origText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '&#9203; Locking...';
+            try {
+                const r = await fetch(API_BASE + '/api/admin/lock-shuffle', {
+                    method: 'POST', headers: authHeaders(), body: '{}'
+                });
+                const d = await r.json();
+                if (r.ok && d.success) {
+                    applyShuffleLockUI(true, new Date().toISOString());
+                    renderShuffleStatus('Shuffle is now LOCKED. No further shuffles will be allowed until unlocked.', 'success');
+                } else {
+                    renderShuffleStatus(d.message || 'Lock failed.', 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = origText;
+                }
+            } catch (ex) {
+                renderShuffleStatus('Network error during lock.', 'error');
+                btn.disabled = false;
+                btn.innerHTML = origText;
+            }
+        }
+
+        async function doUnlockShuffle() {
+            if (!confirm('Unlocking allows the current shuffle to be changed and wiped. All existing shuffled assignments, FizzBuzz groups, and progress will be overwritten on next shuffle. Continue?')) return;
+            const btn = document.getElementById('unlock-shuffle-btn');
+            const origText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '&#9203; Unlocking...';
+            try {
+                const r = await fetch(API_BASE + '/api/admin/unlock-shuffle', {
+                    method: 'POST', headers: authHeaders(), body: '{}'
+                });
+                const d = await r.json();
+                if (r.ok && d.success) {
+                    applyShuffleLockUI(false, null);
+                    renderShuffleStatus('Shuffle is now UNLOCKED. You may re-run shuffle.', 'success');
+                } else {
+                    renderShuffleStatus(d.message || 'Unlock failed.', 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = origText;
+                }
+            } catch (ex) {
+                renderShuffleStatus('Network error during unlock.', 'error');
+                btn.disabled = false;
+                btn.innerHTML = origText;
+            }
+        }
+
+        /* ── cached teams for button state ── */
+        let currentTeamsCache = [];
 
         function getShuffleEligibility(teams) {
             const completeTeams = (teams || []).filter(t => Array.isArray(t.members) && t.members.length === 4);
@@ -811,15 +1008,34 @@
         }
 
         function updateShuffleButtonState(teams) {
+            currentTeamsCache = teams || [];
             const shuffleButton = document.getElementById('shuffle-all-btn');
+            const retryButton   = document.getElementById('retry-shuffle-btn');
             const { canShuffle, completeTeamsCount } = getShuffleEligibility(teams);
-            shuffleButton.disabled = !canShuffle;
-            shuffleButton.style.opacity = canShuffle ? '1' : '0.5';
-            shuffleButton.style.cursor = canShuffle ? 'pointer' : 'not-allowed';
-            if (!canShuffle) renderShuffleStatus('Shuffle requires 6 complete teams (24 participants).', 'error');
-            else renderShuffleStatus('Ready to shuffle all 6 complete teams.', 'success');
-            if (teams && teams.length !== 6) renderShuffleStatus(`Shuffle requires 6 complete teams (24 participants). Current teams: ${teams.length}.`, 'error');
-            if (teams && teams.length === 6 && completeTeamsCount !== 6) renderShuffleStatus(`Shuffle requires 6 complete teams (24 participants). Complete teams: ${completeTeamsCount}/6.`, 'error');
+            const lockBlocked = currentShuffleLocked;
+
+            const canActuallyShuffle = canShuffle && !lockBlocked;
+
+            if (shuffleButton) {
+                shuffleButton.disabled = !canActuallyShuffle;
+                shuffleButton.style.opacity = canActuallyShuffle ? '1' : '0.5';
+                shuffleButton.style.cursor = canActuallyShuffle ? 'pointer' : 'not-allowed';
+            }
+            if (retryButton) {
+                retryButton.disabled = !canActuallyShuffle;
+                retryButton.style.opacity = canActuallyShuffle ? '1' : '0.5';
+                retryButton.style.cursor = canActuallyShuffle ? 'pointer' : 'not-allowed';
+            }
+
+            if (lockBlocked) {
+                renderShuffleStatus('Shuffle is LOCKED. Unlock first to enable shuffling.', 'error');
+            } else if (!canShuffle) {
+                if (teams && teams.length !== 6) renderShuffleStatus(`Shuffle requires 6 complete teams (24 participants). Current teams: ${teams.length}.`, 'error');
+                else if (teams && teams.length === 6 && completeTeamsCount !== 6) renderShuffleStatus(`Shuffle requires 6 complete teams (24 participants). Complete teams: ${completeTeamsCount}/6.`, 'error');
+                else renderShuffleStatus('Shuffle requires 6 complete teams (24 participants).', 'error');
+            } else {
+                renderShuffleStatus('Ready to shuffle all 6 complete teams.', 'success');
+            }
         }
 
         async function loadRegisteredTeams() {
@@ -989,7 +1205,7 @@
         }
 
         /* ── Shuffle trigger ── */
-        async function triggerShuffle() {
+        async function triggerShuffle(forceReset = false) {
             const teamData = await fetch(API_BASE + '/api/registered-teams', { headers: authHeaders() });
             const teamPayload = await teamData.json();
             const teams = teamPayload && teamPayload.success === true ? (teamPayload.teams || []) : [];
@@ -999,9 +1215,16 @@
                 return;
             }
 
+            if (currentShuffleLocked) {
+                renderShuffleStatus('Shuffle is LOCKED. Unlock first to reshuffle.', 'error');
+                return;
+            }
+
             // Disable buttons
             document.getElementById('shuffle-all-btn').disabled = true;
             document.getElementById('retry-shuffle-btn').disabled = true;
+            document.getElementById('lock-shuffle-btn').disabled  = true;
+            document.getElementById('unlock-shuffle-btn').disabled  = true;
 
             // Start overlay animation (runs in parallel with the API call)
             const animPromise = runOverlayAnimation();
@@ -1009,7 +1232,8 @@
             try {
                 const response = await fetch(API_BASE + '/api/start-shuffle', {
                     method: 'POST',
-                    headers: authHeaders()
+                    headers: authHeaders(),
+                    body: JSON.stringify({ force_reset: forceReset })
                 });
                 const data = await response.json();
 
@@ -1018,11 +1242,23 @@
 
                 if (!response.ok || !data || data.success !== true) {
                     hideOverlay();
-                    renderShuffleStatus(data && data.message ? data.message : 'Shuffle failed.', 'error');
+                    if (data && data.locked) {
+                        renderShuffleStatus('Shuffle is LOCKED. Unlock first to reshuffle.', 'error');
+                        loadShuffleStatus();
+                    } else {
+                        renderShuffleStatus(data && data.message ? data.message : 'Shuffle failed.', 'error');
+                    }
                     seatingGroupsEl.innerHTML = '<div class="team-card">Shuffle failed. Try again.</div>';
                 } else {
                     await showOverlaySuccess(data.groups_created || 6);
-                    renderShuffleStatus(`Shuffle completed. ${data.groups_created || 0} groups created.${data.assignments_written ? ' Tasks assigned.' : ''}`, 'success');
+                    renderShuffleStatus(
+                        `Shuffle completed. ${data.groups_created || 0} groups created.${data.assignments_written ? ' Tasks assigned.' : ''}` +
+                        (forceReset ? ' (Retry mode: previous FizzBuzz data cleared.)' : ''),
+                        'success'
+                    );
+
+                    // Reload shuffle status (in case anything changed)
+                    await loadShuffleStatus();
 
                     // Auto-switch to Seating Arrangement tab
                     document.querySelectorAll('.nav-btn').forEach(n => n.classList.remove('active'));
@@ -1036,13 +1272,15 @@
                 renderShuffleStatus('Unable to reach the shuffle endpoint.', 'error');
                 seatingGroupsEl.innerHTML = '<div class="team-card">Unable to fetch seating layout.</div>';
             } finally {
-                document.getElementById('shuffle-all-btn').disabled = false;
-                document.getElementById('retry-shuffle-btn').disabled = false;
+                // Re-enable buttons based on lock state
+                await loadShuffleStatus();
             }
         }
 
-        document.getElementById('shuffle-all-btn').addEventListener('click', triggerShuffle);
-        document.getElementById('retry-shuffle-btn').addEventListener('click', triggerShuffle);
+        document.getElementById('shuffle-all-btn').addEventListener('click', () => triggerShuffle(false));
+        document.getElementById('retry-shuffle-btn').addEventListener('click', () => triggerShuffle(true));
+        document.getElementById('lock-shuffle-btn').addEventListener('click', doLockShuffle);
+        document.getElementById('unlock-shuffle-btn').addEventListener('click', doUnlockShuffle);
 
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -1104,6 +1342,7 @@
             document.getElementById('login-modal').style.display = 'none';
             loadRegisteredTeams();
             loadSeatingArrangement();
+            loadShuffleStatus();
         }
     </script>
 </body>

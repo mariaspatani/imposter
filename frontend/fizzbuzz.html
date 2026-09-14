@@ -182,10 +182,9 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
 
     <script>
         var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '')
-            ? 'http://localhost:3000'
-            : '';
+            ? 'http://localhost:3000' : '';
 
-        var PARTICIPANT_ID   = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
+        var PARTICIPANT_ID = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
         if (!PARTICIPANT_ID) {
             var _s = sessionStorage.getItem('imposterParticipant');
             var _p = _s ? JSON.parse(_s) : null;
@@ -206,108 +205,116 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
         function showState(s){
             ['loading','waiting','open','expired'].forEach(function(n){
                 var el=document.getElementById('state-'+n);
-                if(el) el.style.display=(n===s)?'block':'none';
+                if(el) el.style.display=(n===s?'block':'none');
             });
         }
 
         function toggleClassified(){
-            var body  = document.getElementById('classified-body');
-            var arrow = document.getElementById('classified-arrow');
-            var sub   = document.getElementById('secret-subtitle');
+            var body=document.getElementById('classified-body'), arrow=document.getElementById('classified-arrow'), sub=document.getElementById('secret-subtitle');
             body.classList.toggle('open');
-            var isOpen = body.classList.contains('open');
-            arrow.className = isOpen ? 'secret-chevron open' : 'secret-chevron';
-            if (sub) sub.innerText = isOpen ? 'This section is only for the imposter. Do not reveal this to your teammates.' : 'Tap to reveal your secret mission.';
+            var isOpen=body.classList.contains('open');
+            arrow.className=isOpen?'secret-chevron open':'secret-chevron';
+            if(sub) sub.innerText=isOpen?'This section is only for the imposter. Do not reveal this to your teammates.':'Tap to reveal your secret mission.';
         }
 
         function enterCoding(){
-            // If dropdown is showing, ensure a group is selected
-            var sel = document.getElementById('info-group-select');
-            if (sel && sel.style.display !== 'none') {
-                var chosen = sel.value;
-                if (!chosen) { alert('Please select your Shuffled Group before continuing.'); return; }
-                localStorage.setItem('fizzbuzz_group', chosen);
+            var sel=document.getElementById('info-group-select');
+            if(sel && sel.style.display!=='none'){
+                if(!sel.value){ alert('Please select your Shuffled Group before continuing.'); return; }
+                localStorage.setItem('fizzbuzz_group', sel.value);
             }
             window.location.href='fizzbuzz_coding.html';
         }
 
         async function loadStatus(){
             try {
-                // Check toggle
-                var tr = await fetch(API_BASE + '/api/fizzbuzz/toggle');
+                var tr = await fetch(API_BASE+'/api/fizzbuzz/toggle');
                 var td = await tr.json();
-                if (!td.success) { showState('waiting'); return; }
+                if(!td.success){ showState('waiting'); schedulePoll(); return; }
 
-                // Only show expired if actually finished AND time really ran out
-                if (td.status === 'finished' || (td.remaining_seconds !== undefined && td.remaining_seconds <= 0 && td.status !== 'running')) {
-                    showState('expired'); return;
-                }
-                if (!td.fizzbuzz_open) { showState('waiting'); return; }
+                // status is now: waiting | active | closed
+                if(td.status === 'closed'){ showState('expired'); stopPoll(); return; }
+                if(td.status !== 'active'){ showState('waiting'); schedulePoll(); return; }
 
-                // Get participant info + role
-                var ar = await fetch(API_BASE + '/api/fizzbuzz/status/'+PARTICIPANT_ID);
-                var ad = await ar.json();
+                // ── ACTIVE — load participant info ────────────────────────────
+                stopPoll(); // stop polling, event is open
 
-                // Fetch shuffled_group from main_event_assignments as authoritative source
-                var shuffledGroup = (ad.success && ad.shuffled_group) || '';
-                if (!shuffledGroup) {
+                var ad = { success: false };
+                try {
+                    var ar = await fetch(API_BASE+'/api/fizzbuzz/status/'+PARTICIPANT_ID);
+                    if(ar.ok) ad = await ar.json();
+                } catch(e){}
+
+                // Resolve shuffled group
+                var shuffledGroup = (ad.success && ad.shuffled_group) || localStorage.getItem('fizzbuzz_group') || '';
+                if(!shuffledGroup){
                     try {
-                        var mr = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
-                        var md = await mr.json();
-                        if (md.success && md.assignment && md.assignment.shuffled_group) {
+                        var mr = await fetch(API_BASE+'/api/my-assignment/'+PARTICIPANT_ID);
+                        var md = mr.ok ? await mr.json() : {};
+                        if(md.success && md.assignment && md.assignment.shuffled_group)
                             shuffledGroup = md.assignment.shuffled_group;
-                        }
                     } catch(e2){}
                 }
 
                 showState('open');
+                document.getElementById('info-name').innerText = PARTICIPANT_NAME || (ad.success ? ad.participant_name||'--' : '--');
+                document.getElementById('info-team').innerText = ORIGINAL_TEAM || '--';
 
-                document.getElementById('info-name').innerText  = PARTICIPANT_NAME || (ad.success ? ad.participant_name||'--' : '--');
-                document.getElementById('info-team').innerText  = ORIGINAL_TEAM || '--';
-
-                if (shuffledGroup) {
-                    // Show the group value directly
+                if(shuffledGroup){
                     document.getElementById('info-group').innerText = shuffledGroup;
                     document.getElementById('info-group-select').style.display = 'none';
-                    // Persist for coding page
                     localStorage.setItem('fizzbuzz_group', shuffledGroup);
                 } else {
-                    // Fallback: show dropdown so participant can self-select
                     document.getElementById('info-group').style.display = 'none';
                     document.getElementById('info-group-select').style.display = 'inline-block';
                 }
 
-                // Classified mission for Imposter only
-                // Use my-assignment as authoritative source for is_imposter
-                var isImposter = (ad.success && ad.is_imposter) ? true : false;
-                if (!isImposter) {
+                // Imposter secret mission
+                var isImposter = !!(ad.success && ad.is_imposter);
+                if(!isImposter){
                     try {
-                        var mr2 = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
-                        var md2 = await mr2.json();
-                        if (md2.success && md2.assignment && md2.assignment.is_imposter === true) {
-                            isImposter = true;
-                        }
+                        var mr2 = await fetch(API_BASE+'/api/my-assignment/'+PARTICIPANT_ID);
+                        var md2 = mr2.ok ? await mr2.json() : {};
+                        if(md2.success && md2.assignment && md2.assignment.is_imposter) isImposter = true;
                     } catch(e3){}
                 }
-                if (isImposter) {
-                    document.getElementById('classified-section').style.display = 'block';
-                }
-            } catch(e) {
+                if(isImposter) document.getElementById('classified-section').style.display = 'block';
+
+                // Poll every 5s to detect if coordinator closes the round
+                scheduleClosePoll();
+
+            } catch(e){
                 showState('waiting');
+                schedulePoll();
             }
         }
 
-        // Poll for status change while waiting
-        pollInterval = setInterval(async function(){
-            try {
-                var r = await fetch(API_BASE + '/api/fizzbuzz/toggle');
-                var d = await r.json();
-                if (d.fizzbuzz_open || d.status === 'finished') {
-                    clearInterval(pollInterval);
-                    loadStatus();
-                }
-            } catch(e){}
-        }, 4000);
+        function stopPoll(){ clearInterval(pollInterval); pollInterval = null; }
+
+        function schedulePoll(){
+            // Poll every 3s while waiting for active
+            if(pollInterval) return;
+            pollInterval = setInterval(async function(){
+                try {
+                    var r = await fetch(API_BASE+'/api/fizzbuzz/toggle');
+                    var d = await r.json();
+                    if(d.status === 'active'){ stopPoll(); loadStatus(); }
+                    else if(d.status === 'closed'){ stopPoll(); showState('expired'); }
+                } catch(e){}
+            }, 3000);
+        }
+
+        function scheduleClosePoll(){
+            // Once active, still poll every 5s to detect close
+            if(pollInterval) return;
+            pollInterval = setInterval(async function(){
+                try {
+                    var r = await fetch(API_BASE+'/api/fizzbuzz/toggle');
+                    var d = await r.json();
+                    if(d.status === 'closed'){ stopPoll(); showState('expired'); }
+                } catch(e){}
+            }, 5000);
+        }
 
         loadStatus();
     </script>
