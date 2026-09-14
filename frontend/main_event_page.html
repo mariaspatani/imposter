@@ -60,18 +60,28 @@
         .fizzbuzz-gate-msg { font-size:0.9rem; color:var(--cyan); line-height:1.5; margin-bottom:14px; letter-spacing:0.5px; }
         .btn-fizzbuzz { display:inline-block; padding:13px 36px; background:linear-gradient(135deg,var(--cyan),#4b8cff); color:#00131a; font-family:'Courier New',monospace; font-size:0.95rem; font-weight:bold; text-transform:uppercase; letter-spacing:2px; border:none; border-radius:4px; cursor:pointer; text-decoration:none; transition:opacity 0.2s,transform 0.15s; }
         .btn-fizzbuzz:hover { opacity:0.88; transform:translateY(-1px); }
-        /* ── AI Evaluation Status Card ── */
-        .eval-card { background:rgba(0,0,0,0.5); border:1px solid var(--border-mid); border-radius:6px; padding:24px 26px; }
-        .eval-card.evaluating { border-color:rgba(0,240,255,0.4); }
-        .eval-card.done { border-color:rgba(0,255,128,0.45); }
-        .eval-card.failed { border-color:rgba(220,20,60,0.4); }
-        .eval-header { display:flex; align-items:center; gap:12px; margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--border-dark); }
-        .eval-spinner { width:16px; height:16px; border:2px solid rgba(0,240,255,0.2); border-top-color:var(--cyan); border-radius:50%; animation:spin 0.75s linear infinite; flex-shrink:0; }
-        @keyframes spin { to{transform:rotate(360deg)} }
-        .eval-status-label { font-size:0.72rem; letter-spacing:2px; text-transform:uppercase; color:var(--cyan); }
-        .eval-card.done .eval-status-label { color:var(--green); }
-        .eval-card.failed .eval-status-label { color:var(--primary-red); }
-        .eval-pending { font-size:0.88rem; color:var(--text-sub); text-align:center; padding:8px 0; letter-spacing:1px; }
+        /* ── Celebration Card ── */
+        .celeb-card { position:relative; overflow:hidden; background:linear-gradient(135deg,rgba(0,20,10,0.95),rgba(0,10,20,0.95)); border:1px solid rgba(0,255,128,0.5); border-radius:12px; padding:36px 28px; text-align:center; box-shadow:0 0 40px rgba(0,255,128,0.15), 0 0 80px rgba(0,255,128,0.06); }
+        .celeb-card::before { content:''; position:absolute; inset:0; background:radial-gradient(ellipse at 50% 0%,rgba(0,255,128,0.08) 0%,transparent 70%); pointer-events:none; }
+        .celeb-icon { font-size:4.5rem; line-height:1; margin-bottom:16px; display:block; animation:iconBounce 0.6s cubic-bezier(0.34,1.56,0.64,1) both; }
+        @keyframes iconBounce { from{transform:scale(0.2) rotate(-20deg);opacity:0} to{transform:scale(1) rotate(0deg);opacity:1} }
+        .celeb-check { width:72px; height:72px; border-radius:50%; background:rgba(0,255,128,0.12); border:2px solid rgba(0,255,128,0.6); display:flex; align-items:center; justify-content:center; margin:0 auto 20px; animation:checkPop 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.1s both; box-shadow:0 0 24px rgba(0,255,128,0.35); }
+        @keyframes checkPop { from{transform:scale(0);opacity:0} to{transform:scale(1);opacity:1} }
+        .celeb-check svg { width:36px; height:36px; stroke:var(--green); stroke-width:3; fill:none; stroke-dasharray:60; stroke-dashoffset:60; animation:drawCheck 0.4s ease 0.45s forwards; }
+        @keyframes drawCheck { to{stroke-dashoffset:0} }
+        .celeb-title { font-family:'Courier New',monospace; font-size:1.5rem; font-weight:900; letter-spacing:3px; text-transform:uppercase; color:var(--green); margin-bottom:10px; text-shadow:0 0 20px rgba(0,255,128,0.6); animation:slideUp 0.4s ease 0.3s both; }
+        .celeb-sub { font-size:0.92rem; color:rgba(200,255,230,0.75); line-height:1.65; margin-bottom:24px; letter-spacing:0.5px; animation:slideUp 0.4s ease 0.45s both; }
+        @keyframes slideUp { from{transform:translateY(16px);opacity:0} to{transform:translateY(0);opacity:1} }
+        .celeb-badge { display:inline-flex; align-items:center; gap:8px; background:rgba(0,255,128,0.08); border:1px solid rgba(0,255,128,0.3); border-radius:50px; padding:8px 20px; font-size:0.78rem; letter-spacing:2px; text-transform:uppercase; color:var(--green); animation:slideUp 0.4s ease 0.55s both; }
+        .celeb-badge-dot { width:7px; height:7px; border-radius:50%; background:var(--green); animation:pulse 1.4s ease-in-out infinite; box-shadow:0 0 8px var(--green); }
+        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+        /* Confetti particles */
+        .confetti-wrap { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+        .cp { position:absolute; width:7px; height:7px; border-radius:2px; opacity:0; animation:confettiFall var(--d,1.8s) ease var(--delay,0s) forwards; }
+        @keyframes confettiFall { 0%{transform:translateY(-20px) rotate(0deg);opacity:1} 100%{transform:translateY(220px) rotate(720deg);opacity:0} }
+        /* Subtle failed state */
+        .celeb-card.sub-failed { border-color:rgba(220,20,60,0.4); box-shadow:0 0 30px rgba(220,20,60,0.1); }
+        .celeb-card.sub-failed::before { background:radial-gradient(ellipse at 50% 0%,rgba(220,20,60,0.06) 0%,transparent 70%); }
         
     </style>
 </head>
@@ -109,15 +119,18 @@
             </div>
         </div>
 
-        <!-- Evaluation Status Card — shown after submission -->
+        <!-- Celebration Card — shown immediately after submission -->
         <div id="eval-section" style="display:none;">
-            <div id="eval-card" class="eval-card evaluating">
-                <div class="eval-header">
-                    <div class="eval-spinner" id="eval-spinner"></div>
-                    <span class="eval-status-label" id="eval-status-label">AI Evaluation Pending...</span>
+            <div id="celeb-card" class="celeb-card">
+                <!-- Confetti -->
+                <div class="confetti-wrap" id="confetti-wrap"></div>
+                <!-- Animated checkmark -->
+                <div class="celeb-check">
+                    <svg viewBox="0 0 40 40"><polyline points="8,21 17,30 32,12"/></svg>
                 </div>
-                <div class="eval-pending" id="eval-pending-msg">Your repository is being evaluated. This may take up to 60 seconds.</div>
-                <!-- eval-results intentionally removed: scores are not shown to participants -->
+                <div class="celeb-title" id="celeb-title">Submission Complete!</div>
+                <div class="celeb-sub" id="celeb-sub">Your repository has been received.<br>Sit back and relax — the coordinators will take it from here. 🚀</div>
+                <div class="celeb-badge"><span class="celeb-badge-dot"></span><span id="celeb-badge-txt">Locked In</span></div>
             </div>
         </div>
 
@@ -188,37 +201,42 @@
             document.getElementById('assignment-section').innerHTML = html;
         }
 
-        function showEvalPending() {
-            document.getElementById('eval-section').style.display = 'block';
-            document.getElementById('eval-card').className = 'eval-card evaluating';
-            document.getElementById('eval-spinner').style.display = 'block';
-            document.getElementById('eval-status-label').innerText = 'AI Evaluation In Progress...';
-            document.getElementById('eval-pending-msg').style.display = 'block';
-            document.getElementById('eval-pending-msg').innerText = 'Your repository is being evaluated by AI. This may take up to 60 seconds.';
-            document.getElementById('eval-results').style.display = 'none';
+        // Confetti burst — called once on celebration show
+        function spawnConfetti() {
+            var wrap = document.getElementById('confetti-wrap');
+            if (!wrap) return;
+            var colors = ['#00ff80','#00f0ff','#ff1e43','#ffe566','#bf80ff','#ff8c42','#4bf5c8'];
+            for (var i = 0; i < 48; i++) {
+                var cp = document.createElement('div');
+                cp.className = 'cp';
+                cp.style.left = (Math.random() * 100) + '%';
+                cp.style.background = colors[Math.floor(Math.random() * colors.length)];
+                cp.style.setProperty('--d', (1.2 + Math.random() * 1.4) + 's');
+                cp.style.setProperty('--delay', (Math.random() * 0.6) + 's');
+                cp.style.width = (5 + Math.random() * 7) + 'px';
+                cp.style.height = cp.style.width;
+                cp.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+                wrap.appendChild(cp);
+            }
         }
 
-        function showEvalFailed(msg) {
+        function showCelebration(msg, sub) {
             document.getElementById('eval-section').style.display = 'block';
-            var card = document.getElementById('eval-card');
-            card.className = 'eval-card failed';
-            document.getElementById('eval-spinner').style.display = 'none';
-            document.getElementById('eval-status-label').innerText = 'Evaluation Failed';
-            document.getElementById('eval-pending-msg').style.display = 'block';
-            document.getElementById('eval-pending-msg').innerText = (msg || 'AI evaluation failed. Your submission is safe. Please ask the coordinator to trigger re-evaluation from the admin dashboard.');
-            document.getElementById('eval-results').style.display = 'none';
+            document.getElementById('celeb-card').className = 'celeb-card';
+            document.getElementById('celeb-title').innerText = msg || 'Submission Complete!';
+            document.getElementById('celeb-sub').innerHTML = sub ||
+                'Your repository has been received.<br>Sit back and relax — the coordinators will take it from here. 🚀';
+            document.getElementById('celeb-badge-txt').innerText = 'Locked In';
+            // Spawn confetti only once
+            var wrap = document.getElementById('confetti-wrap');
+            if (wrap && wrap.children.length === 0) spawnConfetti();
         }
 
-        function showEvalResults(a) {
-            document.getElementById('eval-section').style.display = 'block';
-            var card = document.getElementById('eval-card');
-            card.className = 'eval-card done';
-            document.getElementById('eval-spinner').style.display = 'none';
-            document.getElementById('eval-status-label').innerText = 'Evaluation Complete';
-            document.getElementById('eval-pending-msg').style.display = 'block';
-            document.getElementById('eval-pending-msg').innerText = 'Your submission has been evaluated. Results will be announced by the coordinator.';
-            // Scores are intentionally NOT displayed to participants.
-        }
+        function showEvalPending() { showCelebration(); }  // keep old callers working
+        function showEvalFailed()  { showCelebration('Submission Received!',
+            'Your repository is safely saved. The coordinators will verify your work. 👍'); }
+        function showEvalResults() { showCelebration('You\'re All Done!',
+            'Your work is in. Results will be announced by the coordinator. Good luck! 🎉'); }
 
         function lockForm(repo, ts, owner, repoName) {
             document.getElementById('submissionForm').style.display = 'none';
@@ -230,33 +248,9 @@
             b.style.display = 'block';
         }
 
-        // Poll for evaluation result (called after submission)
-        var pollTimer = null;
-        var pollAttempts = 0;
+        // Show celebration immediately — no polling needed since scores are hidden
         function startPolling() {
-            pollAttempts = 0;
-            showEvalPending();
-            pollTimer = setInterval(async function(){
-                pollAttempts++;
-                if (pollAttempts > 36) {
-                    clearInterval(pollTimer);
-                    showEvalFailed('Evaluation is taking longer than expected. Your submission is safe. Please ask the coordinator to re-evaluate from the admin dashboard.');
-                    return;
-                }
-                try {
-                    var res = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
-                    var data = await res.json();
-                    if (!data.success || !data.assignment) return;
-                    var a = data.assignment;
-                    if (a.submission_status === 'Evaluated' || a.evaluation_status === 'Evaluated') {
-                        clearInterval(pollTimer);
-                        showEvalResults(a);
-                    } else if (a.evaluation_status === 'Failed') {
-                        clearInterval(pollTimer);
-                        showEvalFailed(a.ai_feedback || null);
-                    }
-                } catch(e){}
-            }, 5000); // poll every 5s
+            showCelebration();
         }
 
         async function loadAssignment() {
