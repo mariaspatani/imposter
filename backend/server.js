@@ -279,8 +279,10 @@ app.get('/api/my-assignment/:participantId', async (req, res) => {
         'participant_id, participant_name, original_team, shuffled_group, ' +
         'task_number, task_title, task_description, ' +
         'person_slot, role_name, work_description, is_imposter, ' +
-        'github_repo, github_owner, github_repo_name, submission_status, evaluation_status, submitted_at, ' +
-        'ai_score, ui_score, task_match_score, logic_score, creativity_score, code_quality_score, ai_feedback'
+        'github_repo, github_owner, github_repo_name, submission_status, evaluation_status, submitted_at'
+        // NOTE: Score fields (ai_score, ui_score, task_match_score, logic_score,
+        // creativity_score, code_quality_score, ai_feedback) are intentionally
+        // omitted — scores are NOT visible to participants.
       )
       .eq('participant_id', participantId)
       .maybeSingle();
@@ -692,9 +694,11 @@ app.get('/api/my-scores/:participantId', async (req, res) => {
     const participantId = String(req.params.participantId || '').trim();
     if (!(/^\d+$/.test(participantId) || isUUID(participantId))) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
 
+    // NOTE: /api/my-scores is intentionally restricted — scores are NOT
+    // visible to participants. Only the participant name is returned.
     const { data, error } = await supabase
       .from('main_event_assignments')
-      .select('participant_name, main_event_score, fizzbuzz_score, ai_score')
+      .select('participant_name')
       .eq('participant_id', participantId)
       .maybeSingle();
 
@@ -704,10 +708,8 @@ app.get('/api/my-scores/:participantId', async (req, res) => {
     return res.json({
       success: true,
       scores: {
-        participant_name: data.participant_name,
-        main_event_score: Number(data.main_event_score || 0),
-        fizzbuzz_score:   Number(data.fizzbuzz_score   || 0),
-        ai_score:         Number(data.ai_score         || 0)
+        participant_name: data.participant_name
+        // Scores are hidden from participants — only admins can view them.
       }
     });
   } catch (err) {

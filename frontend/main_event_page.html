@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -60,7 +60,7 @@
         .fizzbuzz-gate-msg { font-size:0.9rem; color:var(--cyan); line-height:1.5; margin-bottom:14px; letter-spacing:0.5px; }
         .btn-fizzbuzz { display:inline-block; padding:13px 36px; background:linear-gradient(135deg,var(--cyan),#4b8cff); color:#00131a; font-family:'Courier New',monospace; font-size:0.95rem; font-weight:bold; text-transform:uppercase; letter-spacing:2px; border:none; border-radius:4px; cursor:pointer; text-decoration:none; transition:opacity 0.2s,transform 0.15s; }
         .btn-fizzbuzz:hover { opacity:0.88; transform:translateY(-1px); }
-        /* ── AI Evaluation Card ── */
+        /* ── AI Evaluation Status Card ── */
         .eval-card { background:rgba(0,0,0,0.5); border:1px solid var(--border-mid); border-radius:6px; padding:24px 26px; }
         .eval-card.evaluating { border-color:rgba(0,240,255,0.4); }
         .eval-card.done { border-color:rgba(0,255,128,0.45); }
@@ -71,15 +71,6 @@
         .eval-status-label { font-size:0.72rem; letter-spacing:2px; text-transform:uppercase; color:var(--cyan); }
         .eval-card.done .eval-status-label { color:var(--green); }
         .eval-card.failed .eval-status-label { color:var(--primary-red); }
-        .eval-score-hero { display:flex; align-items:baseline; gap:8px; margin-bottom:16px; }
-        .eval-score-num { font-size:3rem; font-weight:900; color:var(--cyan); letter-spacing:2px; line-height:1; text-shadow:0 0 20px rgba(0,240,255,0.6); }
-        .eval-score-den { font-size:1rem; color:var(--text-sub); }
-        .eval-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:16px; }
-        .eval-cell { background:rgba(255,255,255,0.03); border:1px solid var(--border-dark); border-radius:4px; padding:10px 12px; }
-        .eval-cell-label { font-size:0.6rem; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-sub); margin-bottom:4px; }
-        .eval-cell-val { font-size:1.1rem; font-weight:700; color:var(--cyan); }
-        .eval-feedback-label { font-size:0.65rem; letter-spacing:2px; text-transform:uppercase; color:var(--text-sub); margin-bottom:6px; }
-        .eval-feedback-text { font-size:0.88rem; color:var(--text-main); line-height:1.68; }
         .eval-pending { font-size:0.88rem; color:var(--text-sub); text-align:center; padding:8px 0; letter-spacing:1px; }
         
     </style>
@@ -118,23 +109,15 @@
             </div>
         </div>
 
-        <!-- AI Evaluation Card — shown after submission -->
+        <!-- Evaluation Status Card — shown after submission -->
         <div id="eval-section" style="display:none;">
             <div id="eval-card" class="eval-card evaluating">
                 <div class="eval-header">
                     <div class="eval-spinner" id="eval-spinner"></div>
                     <span class="eval-status-label" id="eval-status-label">AI Evaluation Pending...</span>
                 </div>
-                <div class="eval-pending" id="eval-pending-msg">Your repository is being evaluated by AI. This may take up to 60 seconds.</div>
-                <div id="eval-results" style="display:none;">
-                    <div class="eval-score-hero">
-                        <span class="eval-score-num" id="eval-score-num">--</span>
-                        <span class="eval-score-den">/ 100</span>
-                    </div>
-                    <div class="eval-grid" id="eval-grid"></div>
-                    <div class="eval-feedback-label">AI Feedback</div>
-                    <div class="eval-feedback-text" id="eval-feedback-text"></div>
-                </div>
+                <div class="eval-pending" id="eval-pending-msg">Your repository is being evaluated. This may take up to 60 seconds.</div>
+                <!-- eval-results intentionally removed: scores are not shown to participants -->
             </div>
         </div>
 
@@ -231,21 +214,10 @@
             var card = document.getElementById('eval-card');
             card.className = 'eval-card done';
             document.getElementById('eval-spinner').style.display = 'none';
-            document.getElementById('eval-status-label').innerText = 'AI Evaluation Complete';
-            document.getElementById('eval-pending-msg').style.display = 'none';
-            document.getElementById('eval-results').style.display = 'block';
-            document.getElementById('eval-score-num').innerText = a.ai_score != null ? a.ai_score : '--';
-            var breakdowns = [
-                { label:'Task Completion', val: a.task_match_score,   max:40 },
-                { label:'UI / UX',         val: a.ui_score,           max:20 },
-                { label:'Logic & Code',    val: a.logic_score,        max:20 },
-                { label:'Responsiveness',  val: a.code_quality_score, max:10 },
-                { label:'Creativity',      val: a.creativity_score,   max:10 }
-            ];
-            document.getElementById('eval-grid').innerHTML = breakdowns.map(function(b){
-                return '<div class="eval-cell"><div class="eval-cell-label">'+esc(b.label)+'</div><div class="eval-cell-val">'+(b.val!=null?b.val:'--')+'<span style="font-size:0.65rem;color:var(--text-sub);margin-left:2px;">/'+b.max+'</span></div></div>';
-            }).join('');
-            document.getElementById('eval-feedback-text').innerText = a.ai_feedback || '';
+            document.getElementById('eval-status-label').innerText = 'Evaluation Complete';
+            document.getElementById('eval-pending-msg').style.display = 'block';
+            document.getElementById('eval-pending-msg').innerText = 'Your submission has been evaluated. Results will be announced by the coordinator.';
+            // Scores are intentionally NOT displayed to participants.
         }
 
         function lockForm(repo, ts, owner, repoName) {
