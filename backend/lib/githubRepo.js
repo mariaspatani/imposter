@@ -27,6 +27,7 @@ function shouldSkip(entryName) {
 async function downloadAndReadRepo(githubUrl) {
   const clean = String(githubUrl || '').trim().replace(/\/$/, '');
   const urls = [
+    `${clean}/archive/HEAD.zip`,
     `${clean}/archive/refs/heads/main.zip`,
     `${clean}/archive/refs/heads/master.zip`
   ];

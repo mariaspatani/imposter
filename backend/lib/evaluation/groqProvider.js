@@ -21,7 +21,7 @@ class GroqEvaluationProvider extends EvaluationProvider {
   constructor({ apiKey, model } = {}) {
     super();
     this.apiKey = apiKey || process.env.GROQ_API_KEY;
-    this.model = model || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+    this.model = model || process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
   }
 
   async evaluateSubmission(input) {
@@ -117,28 +117,56 @@ ${jsonShape},
 ${sourceCode}
 --- END UNTRUSTED REPOSITORY SOURCE CODE ---`;
 
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: this.model,
-        temperature: 0.1,
-        max_tokens: 700,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        response_format: { type: 'json_object' },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 60_000,
-      }
-    );
+    const modelsToTry = [
+      this.model,
+      'openai/gpt-oss-120b',
+      'qwen/qwen3.8-27b',
+      'groq/compound'
+    ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
-    const raw = response?.data?.choices?.[0]?.message?.content;
+    let lastError = null;
+    let response = null;
+
+    for (const modelToUse of modelsToTry) {
+      try {
+        response = await axios.post(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            model: modelToUse,
+            temperature: 0.1,
+            max_tokens: 700,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            response_format: { type: 'json_object' },
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 60_000,
+          }
+        );
+        if (response?.data?.choices?.[0]?.message?.content) {
+          break;
+        }
+      } catch (err) {
+        lastError = err;
+        const is404 = err.response && (err.response.status === 404 || err.response.data?.error?.code === 'model_not_found');
+        if (!is404) {
+          throw err;
+        }
+        console.warn(`[Groq] Model ${modelToUse} not available, trying fallback...`);
+      }
+    }
+
+    if (!response?.data?.choices?.[0]?.message?.content) {
+      throw lastError || new Error('No evaluation response received from Groq.');
+    }
+
+    const raw = response.data.choices[0].message.content;
     const parsed = parseJsonSafe(raw);
     return validateCriteriaScores(parsed, criteria);
   }

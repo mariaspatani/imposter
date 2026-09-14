@@ -104,9 +104,10 @@ async function processEvaluation(supabase, participantId, options = {}) {
   try {
     // Run runtime evaluation if available (graceful degradation)
     let runtimeEvidence = null;
+    let sourceCode = null;
     try {
       const { downloadAndReadRepo } = require('../githubRepo');
-      const sourceCode = await downloadAndReadRepo(asgn.github_repo);
+      sourceCode = await downloadAndReadRepo(asgn.github_repo);
       runtimeEvidence = await runtimeEvaluator.evaluate({ assignment: asgn, sourceCode });
       logEvent('RUNTIME_EVALUATION', { 
         participantId, 
@@ -126,22 +127,19 @@ async function processEvaluation(supabase, participantId, options = {}) {
     const result = await provider.evaluateSubmission({ 
       assignment: asgn, 
       criteria,
-      runtimeEvidence 
+      runtimeEvidence,
+      sourceCode
     });
     const scorePatch = toAssignmentColumns(result, criteria);
     const fizz = Number(asgn.fizzbuzz_score || 0);
     const totalIndividual = Number(scorePatch.main_event_score || 0) + fizz;
 
-    // Set evaluation status based on runtime availability
-    // Use 'Evaluated' for both, but store runtime mode in separate field for admin visibility
-    const evaluationStatus = 'Evaluated';
-    
     const { error: updErr } = await supabase.from('main_event_assignments').update({
       ...scorePatch,
-      evaluation_status: evaluationStatus,
-      submission_status: 'Evaluated',
+      total_score: result.total,
       total_individual_score: totalIndividual,
-      runtime_mode: runtimeEvidence?.runtime_mode || 'STATIC_ONLY',
+      evaluation_status: 'Evaluated',
+      submission_status: 'Evaluated',
     }).eq('participant_id', participantId);
 
     if (updErr) throw new Error(updErr.message);
@@ -156,11 +154,6 @@ async function processEvaluation(supabase, participantId, options = {}) {
       error_message: null,
       runtime_evidence: runtimeEvidence || null,
     });
-
-    // Also store runtime evidence in main_event_assignments for admin visibility
-    await supabase.from('main_event_assignments').update({
-      runtime_evidence: runtimeEvidence || null
-    }).eq('participant_id', participantId);
 
     try {
       await recordScoreEvent(supabase, {

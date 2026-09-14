@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const express   = require('express');
 const cors      = require('cors');
@@ -6,6 +6,7 @@ const crypto    = require('crypto');
 const path      = require('path');
 const axios     = require('axios');
 require('dotenv').config();
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { createClient }    = require('@supabase/supabase-js');
 const { validateRepository } = require('./aiScorer');
@@ -405,11 +406,11 @@ app.post('/api/submit-github', submitLimiter, async (req, res) => {
  * Safe to call from background — all errors are caught and saved.
  * Uses the new processEvaluation pipeline for proper state machine.
  */
-async function runEvaluation(participantId, assignmentData) {
+async function runEvaluation(participantId, assignmentData, options = {}) {
   try {
     const result = await processEvaluation(supabase, participantId, {
-      retry: false,
-      force: false
+      retry: options.retry !== undefined ? options.retry : false,
+      force: options.force !== undefined ? options.force : false
     });
 
     console.log('[eval] Completed for', participantId, '— success:', result.success, 'state:', result.evaluation_state);
@@ -678,7 +679,7 @@ app.get('/api/event-timers', async (req, res) => {
   try {
     const { data, error } = await supabase.from('event_timers').select('*').order('event_key');
     if (error) return res.status(500).json({ success: false, message: error.message });
-    return res.json({ success: true, timers: (data || []).map(normaliseTimer) });
+    return res.json({ success: true, timers: (data || []).map(t => normaliseTimer(t)) });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -1443,7 +1444,7 @@ app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, a
       role_name:        asgn.role_name,
       work_description: asgn.work_description,
       is_imposter:      asgn.is_imposter
-    }).catch(err => console.error('[re-eval]', participantId, err.message));
+    }, { retry: true, force: true }).catch(err => console.error('[re-eval]', participantId, err.message));
 
     auditLog('re_evaluate', participantId, { participant: asgn.participant_name });
   } catch (err) {
@@ -1721,7 +1722,7 @@ app.get('/api/timers', requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase.from('event_timers').select('*').order('event_key');
     if (error) return res.status(500).json({ success: false, message: error.message });
-    return res.json({ success: true, timers: (data || []).map(normaliseTimer) });
+    return res.json({ success: true, timers: (data || []).map(t => normaliseTimer(t)) });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1732,7 +1733,7 @@ async function timerAction(eventKey, action, extraPayload = {}) {
   const result = timerLib.applyTimerAction(t, action, extraPayload);
   if (!result.ok) return result;
 
-  const { error: updErr } = await supabase.from('event_timers').update({ ...result.update, updated_at: new Date().toISOString() }).eq('event_key', eventKey);
+  const { error: updErr } = await supabase.from('event_timers').update(result.update).eq('event_key', eventKey);
   if (updErr) return { ok: false, message: updErr.message };
 
   if (result.ignore) {
@@ -1889,7 +1890,7 @@ app.post('/api/admin/recover-evaluations', requireAdmin, async (req, res) => {
         role_name:        row.role_name,
         work_description: row.work_description,
         is_imposter:      row.is_imposter
-      }).catch(err => console.error('[recover-eval]', row.participant_id, err.message));
+      }, { retry: true, force: true }).catch(err => console.error('[recover-eval]', row.participant_id, err.message));
     }
 
     auditLog('recover_evaluations', 'system', { count: candidates.length });
