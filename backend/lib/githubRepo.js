@@ -118,9 +118,11 @@ async function validateRepository(repoUrl) {
 
     const r = res.data;
 
-    if (r.private)   return { valid: false, message: 'Repository is private. Please make it public before submitting.' };
-    if (r.archived)  return { valid: false, message: 'Archived repositories cannot be submitted.' };
-    if (r.size === 0) return { valid: false, message: 'Repository appears to be empty.' };
+    if (r.private)  return { valid: false, message: 'Repository is private. Please make it public before submitting.' };
+    if (r.archived) return { valid: false, message: 'Archived repositories cannot be submitted.' };
+    // NOTE: r.size is in KB and is a cached value — GitHub can report 0 for several minutes
+    // after a push (especially on new repos). Do NOT reject on size === 0; let the AI pipeline
+    // detect genuinely empty repos when it tries to download the ZIP.
 
     return { valid: true, owner, repo, defaultBranch: r.default_branch };
 
