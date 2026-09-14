@@ -310,6 +310,56 @@ app.get('/api/my-assignment/:participantId', async (req, res) => {
   }
 });
 
+// ── GET /api/submission-status ───────────────────────────────────────────────
+// Public: returns whether GitHub link submissions are currently open.
+app.get('/api/submission-status', async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from('game_config')
+      .select('config_json')
+      .eq('game_id', 'main_event')
+      .maybeSingle();
+    const open = data?.config_json?.submissions_open !== false; // default: open
+    return res.json({ success: true, submissions_open: open });
+  } catch (err) {
+    return res.json({ success: true, submissions_open: true }); // fail-open
+  }
+});
+
+// ── POST /api/admin/toggle-submissions ────────────────────────────────────────
+// Admin: explicitly set submissions open or closed.
+app.post('/api/admin/toggle-submissions', requireAdmin, async (req, res) => {
+  try {
+    const open = req.body?.open !== undefined ? !!req.body.open : null;
+
+    // If no explicit value, read current state and flip it
+    let newOpen = open;
+    if (newOpen === null) {
+      const { data } = await supabase
+        .from('game_config').select('config_json').eq('game_id', 'main_event').maybeSingle();
+      newOpen = data?.config_json?.submissions_open === false ? true : false;
+    }
+
+    // Merge into existing config_json
+    const { data: existing } = await supabase
+      .from('game_config').select('config_json').eq('game_id', 'main_event').maybeSingle();
+    const mergedConfig = { ...(existing?.config_json || {}), submissions_open: newOpen };
+
+    await supabase.from('game_config').upsert({
+      game_id: 'main_event',
+      config_json: mergedConfig,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'game_id' });
+
+    auditLog('toggle_submissions', 'main_event', { submissions_open: newOpen });
+    console.log('[submissions-toggle] submissions_open set to', newOpen);
+    return res.json({ success: true, submissions_open: newOpen });
+  } catch (err) {
+    console.error('[toggle-submissions]', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ── POST /api/submit-github ───────────────────────────────────────────────────
 
 app.post('/api/submit-github', submitLimiter, async (req, res) => {
@@ -324,6 +374,18 @@ app.post('/api/submit-github', submitLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please enter a valid GitHub repository URL (e.g. https://github.com/username/repository).' });
     }
 
+    // Check if submissions are currently open (admin toggle)
+    try {
+      const { data: cfg } = await supabase
+        .from('game_config').select('config_json').eq('game_id', 'main_event').maybeSingle();
+      if (cfg?.config_json?.submissions_open === false) {
+        return res.status(403).json({
+          success: false,
+          submissions_closed: true,
+          message: 'Submissions are currently closed by the coordinator. Please wait.'
+        });
+      }
+    } catch (_) { /* fail-open: if config unreachable, allow submission */ }
     // Fetch assignment — must exist and must not already be submitted
     const { data: existing, error: fetchErr } = await supabase
       .from('main_event_assignments')

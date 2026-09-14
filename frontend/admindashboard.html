@@ -76,6 +76,19 @@
             </div>
             <!-- Right panel -->
             <div class="space-y-4 sticky top-20">
+                <!-- ── GitHub Submissions Toggle ── -->
+                <div class="bg-cardgray border border-bordergray rounded-2xl p-4 shadow-2xl space-y-3">
+                    <div class="border-b border-bordergray pb-2 flex items-center justify-between">
+                        <h3 class="text-xs font-orbitron font-bold text-crimson-500 uppercase tracking-widest">GitHub Submissions</h3>
+                        <span id="sub-status-badge" class="text-[10px] font-orbitron px-2 py-0.5 rounded border border-gray-600 text-gray-400">…</span>
+                    </div>
+                    <p id="sub-status-msg" class="text-[10px] font-rajdhani text-gray-400 text-center">Loading…</p>
+                    <button id="sub-toggle-btn" onclick="toggleSubmissions()"
+                        class="w-full text-xs font-orbitron py-2 px-3 rounded-xl border transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        style="background:rgba(0,255,128,0.08);border-color:rgba(0,255,128,0.3);color:#00ff80;">
+                        Loading…
+                    </button>
+                </div>
                 <!-- ── Shuffle Status Display Only ── -->
                 <div class="bg-cardgray border border-bordergray rounded-2xl p-4 shadow-2xl space-y-3">
                     <div class="border-b border-bordergray pb-2 flex items-center justify-between">
@@ -444,7 +457,74 @@ async function loadTimers(){
     }
 }
 
-async function refreshAll(){ await fetchAll(); renderCurrentTab(); }
+async function refreshAll(){ await fetchAll(); loadSubmissionStatus(); renderCurrentTab(); }
+
+// ── GitHub Submissions Toggle ─────────────────────────────────────────────────
+var _submissionsOpen = true;
+
+function applySubUI(open) {
+    _submissionsOpen = open;
+    const badge = document.getElementById('sub-status-badge');
+    const msg   = document.getElementById('sub-status-msg');
+    const btn   = document.getElementById('sub-toggle-btn');
+    if (!badge || !msg || !btn) return;
+
+    if (open) {
+        badge.textContent = 'OPEN';
+        badge.className = 'text-[10px] font-orbitron px-2 py-0.5 rounded border border-emerald-500/50 text-emerald-400';
+        msg.textContent = 'Participants can currently submit their GitHub links.';
+        msg.className   = 'text-[10px] font-rajdhani text-emerald-400 text-center';
+        btn.textContent = '🔒 Close Submissions';
+        btn.style.cssText = 'background:rgba(220,20,60,0.08);border-color:rgba(220,20,60,0.4);color:#ff1e42;width:100%;';
+    } else {
+        badge.textContent = 'CLOSED';
+        badge.className = 'text-[10px] font-orbitron px-2 py-0.5 rounded border border-rose-500/50 text-rose-400';
+        msg.textContent = 'Submissions are closed. Participants cannot submit links.';
+        msg.className   = 'text-[10px] font-rajdhani text-rose-400 text-center';
+        btn.textContent = '🔓 Open Submissions';
+        btn.style.cssText = 'background:rgba(0,255,128,0.08);border-color:rgba(0,255,128,0.3);color:#00ff80;width:100%;';
+    }
+}
+
+async function loadSubmissionStatus() {
+    try {
+        const r = await fetch(API + '/api/submission-status');
+        const d = await r.json();
+        if (d.success) applySubUI(d.submissions_open);
+    } catch(ex) { /* keep last known state */ }
+}
+
+async function toggleSubmissions() {
+    const btn = document.getElementById('sub-toggle-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        const r = await fetch(API + '/api/admin/toggle-submissions', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ open: !_submissionsOpen })
+        });
+        if (r.status === 401) {
+            document.getElementById('login-modal').style.display = 'flex';
+            alert('Admin authentication required.');
+            if (btn) btn.disabled = false;
+            applySubUI(_submissionsOpen); // restore
+            return;
+        }
+        const d = await r.json();
+        if (d.success) {
+            applySubUI(d.submissions_open);
+        } else {
+            alert('Failed: ' + (d.message || 'Unknown error'));
+            applySubUI(_submissionsOpen);
+        }
+    } catch(ex) {
+        alert('Network error: ' + ex.message);
+        applySubUI(_submissionsOpen);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 
 function renderCurrentTab(){
     const el=document.querySelector('.tab-content:not(.hidden)');
@@ -1533,9 +1613,10 @@ async function init(){
     await fetchAll();
     await refreshFizzToggle();
     await loadShuffleStatus();
+    await loadSubmissionStatus();
     renderOverview();
     // Full data refresh every 30s (does NOT rebuild timer cards — loadTimers handles that)
-    setInterval(async()=>{ await fetchAll(); await refreshFizzToggle(); renderCurrentTab(); }, 30000);
+    setInterval(async()=>{ await fetchAll(); await refreshFizzToggle(); loadSubmissionStatus(); renderCurrentTab(); }, 30000);
     // Start 1s timer refresh if any timer is currently running
     await loadTimers();
 }

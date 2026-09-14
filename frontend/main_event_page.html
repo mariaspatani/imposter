@@ -57,6 +57,10 @@
         .alert-success { background-color:rgba(0,255,128,0.08); border:1px solid var(--green); color:var(--green); }
         .alert-error { background-color:rgba(220,20,60,0.14); border:1px solid var(--primary-crimson); color:var(--primary-red); }
         .submitted-banner { background:rgba(0,255,128,0.06); border:1px solid var(--green); border-radius:4px; padding:14px 18px; color:var(--green); font-size:0.88rem; text-align:center; letter-spacing:1px; word-break:break-all; }
+        .closed-banner { background:rgba(220,20,60,0.08); border:1px solid var(--primary-crimson); border-radius:6px; padding:18px 20px; text-align:center; }
+        .closed-banner-icon { font-size:2rem; display:block; margin-bottom:8px; }
+        .closed-banner-title { color:var(--primary-red); font-weight:900; font-size:0.95rem; letter-spacing:2px; text-transform:uppercase; margin-bottom:6px; }
+        .closed-banner-msg { color:var(--text-sub); font-size:0.82rem; letter-spacing:0.5px; }
         /* FizzBuzz gate */
         .fizzbuzz-gate { background:rgba(0,240,255,0.04); border:1px solid rgba(0,240,255,0.3); border-radius:6px; padding:22px 26px; text-align:center; }
         .fizzbuzz-gate-lbl { font-size:0.65rem; letter-spacing:2px; text-transform:uppercase; color:var(--text-sub); margin-bottom:8px; }
@@ -108,6 +112,12 @@
         <div id="submission-section" style="display:none;">
             <div class="form-card">
                 <h2 class="section-header">Submit GitHub Repository</h2>
+                <!-- Shown when admin closes submissions -->
+                <div id="submissions-closed-banner" class="closed-banner" style="display:none;">
+                    <span class="closed-banner-icon">🔒</span>
+                    <div class="closed-banner-title">Submissions Closed</div>
+                    <div class="closed-banner-msg">The coordinator has temporarily closed GitHub submissions.<br>Please wait — this page will update automatically.</div>
+                </div>
                 <div id="already-submitted-banner" class="submitted-banner" style="display:none;"></div>
                 <form id="submissionForm">
                     <div class="form-group">
@@ -512,6 +522,33 @@
                 _fbGateInterval = setInterval(checkFizzBuzzGate, 3000); // poll every 3s
             }
         };
+
+        // ── Submission Status Polling ─────────────────────────────────────────
+        async function checkSubmissionStatus() {
+            try {
+                var res  = await fetch(API_BASE + '/api/submission-status');
+                var data = await res.json();
+                if (data.success) {
+                    var open = data.submissions_open;
+                    var form = document.getElementById('submissionForm');
+                    var closedBanner = document.getElementById('submissions-closed-banner');
+                    var alreadySubmittedBanner = document.getElementById('already-submitted-banner');
+                    var isAlreadySubmitted = alreadySubmittedBanner && alreadySubmittedBanner.style.display !== 'none';
+                    if (!isAlreadySubmitted) {
+                        if (!open) {
+                            if (form) form.style.display = 'none';
+                            if (closedBanner) closedBanner.style.display = 'block';
+                        } else {
+                            if (form) form.style.display = 'block';
+                            if (closedBanner) closedBanner.style.display = 'none';
+                        }
+                    }
+                }
+            } catch(e){}
+        }
+
+        checkSubmissionStatus();
+        setInterval(checkSubmissionStatus, 5000);
 
         // On page load: fetch assignment, render UI, and start FizzBuzz gate polling if needed.
         // lockForm override (above) handles starting _fbGateInterval automatically when called.
