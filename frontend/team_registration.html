@@ -165,7 +165,7 @@
             font-weight: 700;
         }
 
-        input {
+        input, select {
             width: 100%;
             padding: 14px 14px;
             border-radius: 12px;
@@ -175,11 +175,60 @@
             font-size: 1rem;
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            font-family: 'Rajdhani', sans-serif;
         }
 
-        input:focus {
+        input:focus, select:focus {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.12);
+        }
+
+        select {
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239db5d3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            padding-right: 40px;
+        }
+
+        select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .teams-info-bar {
+            background: rgba(0, 240, 255, 0.06);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .teams-info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .teams-info-label {
+            font-size: 0.62rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .teams-info-value {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.95rem;
+            color: var(--accent);
         }
 
         .button-row { display: flex; justify-content: center; margin-top: 26px; gap: 12px; flex-wrap: wrap; }
@@ -602,7 +651,7 @@
             <div class="overlay-success" id="overlay-success">
                 <div class="overlay-success-icon">&#9989;</div>
                 <div class="overlay-success-text">Shuffle Complete</div>
-                <div class="overlay-success-sub" id="overlay-success-sub">6 Groups Ready</div>
+                <div class="overlay-success-sub" id="overlay-success-sub">Groups Ready</div>
             </div>
         </div>
     </div>
@@ -626,6 +675,35 @@
                 <section id="team-registration" class="panel-section active">
                     <div class="subtitle">Coordinator Dashboard</div>
                     <form id="team-registration-form">
+                        <div class="form-grid">
+                            <div class="field full">
+                                <label for="num-teams-select">Number of Original Teams</label>
+                                <select id="num-teams-select" name="num_teams">
+                                    <option value="3">3 teams (12 participants — Groups 1–3)</option>
+                                    <option value="4">4 teams (16 participants — Groups 1–4)</option>
+                                    <option value="5">5 teams (20 participants — Groups 1–5)</option>
+                                    <option value="6" selected>6 teams (24 participants — Groups 1–6)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="teams-info-bar" class="teams-info-bar">
+                            <div class="teams-info-item">
+                                <span class="teams-info-label">Original Teams</span>
+                                <span class="teams-info-value" id="teams-count-info">6</span>
+                            </div>
+                            <div class="teams-info-item">
+                                <span class="teams-info-label">Shuffled Groups</span>
+                                <span class="teams-info-value" id="groups-count-info">6</span>
+                            </div>
+                            <div class="teams-info-item">
+                                <span class="teams-info-label">Total Participants</span>
+                                <span class="teams-info-value" id="participants-count-info">24</span>
+                            </div>
+                            <div class="teams-info-item">
+                                <span class="teams-info-label">Imposters Selected</span>
+                                <span class="teams-info-value" id="imposters-count-info">6</span>
+                            </div>
+                        </div>
                         <div class="form-grid">
                             <div class="field full">
                                 <label for="team-name">Team Name</label>
@@ -722,6 +800,49 @@
             : '';
 
         function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+        /* ── Expected number of teams (3-6) ── */
+        let numTeamsExpected = 6;
+
+        function updateTeamsInfoBar(n) {
+            const num = (n && n >= 3 && n <= 6) ? n : 6;
+            const tc = document.getElementById('teams-count-info');
+            const gc = document.getElementById('groups-count-info');
+            const pc = document.getElementById('participants-count-info');
+            const ic = document.getElementById('imposters-count-info');
+            if (tc) tc.textContent = String(num);
+            if (gc) gc.textContent = String(num);
+            if (pc) pc.textContent = String(num * 4);
+            if (ic) ic.textContent = String(num);
+        }
+
+        (function initNumTeamsSelector() {
+            const sel = document.getElementById('num-teams-select');
+            if (!sel) return;
+            numTeamsExpected = parseInt(sel.value, 10) || 6;
+            updateTeamsInfoBar(numTeamsExpected);
+            sel.addEventListener('change', () => {
+                numTeamsExpected = parseInt(sel.value, 10) || 6;
+                updateTeamsInfoBar(numTeamsExpected);
+                if (typeof currentTeamsCache !== 'undefined') updateShuffleButtonState(currentTeamsCache);
+            });
+        })();
+
+        function setNumTeamsSelectorDisabled(disabled) {
+            const sel = document.getElementById('num-teams-select');
+            if (sel) sel.disabled = !!disabled;
+        }
+
+        function syncNumTeamsFromActual(actualCount) {
+            if (!actualCount || actualCount < 3 || actualCount > 6) return;
+            const sel = document.getElementById('num-teams-select');
+            numTeamsExpected = actualCount;
+            updateTeamsInfoBar(actualCount);
+            if (sel) {
+                sel.value = String(actualCount);
+                setNumTeamsSelectorDisabled(true);
+            }
+        }
 
         // ── Admin auth ──────────────────────────────────────────────────────────
         let ADMIN_TOKEN = sessionStorage.getItem('admin_token') || '';
@@ -828,13 +949,16 @@
         const successEl   = document.getElementById('overlay-success');
         const successSubEl = document.getElementById('overlay-success-sub');
 
-        const STEPS = [
-            { label: 'Initializing Imposter Protocol...', pct: 8  },
-            { label: 'Scanning 24 Participants...',        pct: 25 },
-            { label: 'Creating Random Groups...',          pct: 48 },
-            { label: 'Assigning Imposters...',             pct: 68 },
-            { label: 'Assigning Main Event Tasks...',      pct: 88 },
-        ];
+        function getSteps() {
+            const expectedPart = (numTeamsExpected || 6) * 4;
+            return [
+                { label: 'Initializing Imposter Protocol...', pct: 8  },
+                { label: 'Scanning ' + expectedPart + ' Participants...', pct: 25 },
+                { label: 'Creating Random Groups...',          pct: 48 },
+                { label: 'Assigning Imposters...',             pct: 68 },
+                { label: 'Assigning Main Event Tasks...',      pct: 88 },
+            ];
+        }
 
         function setProgress(pct) {
             barEl.style.width = pct + '%';
@@ -860,7 +984,7 @@
             overlayAnimating = true;
             animateOverlay();
 
-            for (const step of STEPS) {
+            for (const step of getSteps()) {
                 setStep(step.label);
                 setProgress(step.pct);
                 await delay(600 + Math.random() * 300);
@@ -1003,15 +1127,21 @@
         let currentTeamsCache = [];
 
         function getShuffleEligibility(teams) {
+            const expected = numTeamsExpected;
             const completeTeams = (teams || []).filter(t => Array.isArray(t.members) && t.members.length === 4);
-            return { canShuffle: teams && teams.length === 6 && completeTeams.length === 6, completeTeamsCount: completeTeams.length };
+            const canShuffle = teams
+                && teams.length >= 3
+                && teams.length <= 6
+                && completeTeams.length === teams.length
+                && (!expected || teams.length === expected);
+            return { canShuffle, completeTeamsCount: completeTeams.length, expectedTeams: expected || teams.length };
         }
 
         function updateShuffleButtonState(teams) {
             currentTeamsCache = teams || [];
             const shuffleButton = document.getElementById('shuffle-all-btn');
             const retryButton   = document.getElementById('retry-shuffle-btn');
-            const { canShuffle, completeTeamsCount } = getShuffleEligibility(teams);
+            const { canShuffle, completeTeamsCount, expectedTeams } = getShuffleEligibility(teams);
             const lockBlocked = currentShuffleLocked;
 
             const canActuallyShuffle = canShuffle && !lockBlocked;
@@ -1030,11 +1160,20 @@
             if (lockBlocked) {
                 renderShuffleStatus('Shuffle is LOCKED. Unlock first to enable shuffling.', 'error');
             } else if (!canShuffle) {
-                if (teams && teams.length !== 6) renderShuffleStatus(`Shuffle requires 6 complete teams (24 participants). Current teams: ${teams.length}.`, 'error');
-                else if (teams && teams.length === 6 && completeTeamsCount !== 6) renderShuffleStatus(`Shuffle requires 6 complete teams (24 participants). Complete teams: ${completeTeamsCount}/6.`, 'error');
-                else renderShuffleStatus('Shuffle requires 6 complete teams (24 participants).', 'error');
+                const total = teams ? teams.length : 0;
+                const needed = expectedTeams;
+                const neededPart = needed * 4;
+                const msg = `Shuffle requires ${needed} complete teams (${neededPart} participants).`;
+                if (teams && total !== needed) {
+                    renderShuffleStatus(msg + ` Current teams: ${total}/${needed}.`, 'error');
+                } else if (teams && total === needed && completeTeamsCount !== needed) {
+                    renderShuffleStatus(msg + ` Complete teams: ${completeTeamsCount}/${needed}.`, 'error');
+                } else {
+                    renderShuffleStatus(msg, 'error');
+                }
             } else {
-                renderShuffleStatus('Ready to shuffle all 6 complete teams.', 'success');
+                const n = teams ? teams.length : expectedTeams;
+                renderShuffleStatus(`Ready to shuffle all ${n} complete teams.`, 'success');
             }
         }
 
@@ -1050,6 +1189,9 @@
                 const totalParticipants = teams.reduce((sum, team) => sum + (team.members || []).length, 0);
                 totalTeamsEl.textContent = String(teams.length);
                 totalParticipantsEl.textContent = String(totalParticipants);
+                // Lock the Number-of-Teams selector once any real team exists; sync count
+                if (teams.length > 0) syncNumTeamsFromActual(teams.length);
+                setNumTeamsSelectorDisabled(teams.length > 0);
                 if (teams.length === 0) {
                     registeredTeamsListEl.textContent = 'No real teams registered yet.';
                     updateShuffleButtonState([]);
@@ -1083,13 +1225,22 @@
             shuffleStatusEl.style.display = 'block';
         }
 
-        function buildSixGroups(participants) {
-            const groups = Array.from({ length: 6 }, (_, i) => ({ groupName: `Group ${i + 1}`, members: [] }));
+        function buildGroups(participants, n) {
+            const count = (n && n >= 3 && n <= 6) ? n : (function () {
+                // Fallback: infer from max group number present in participants
+                let maxG = 0;
+                (participants || []).forEach(p => {
+                    const m = (p.seating_group || p.shuffled_group || '').match(/Group\s*(\d+)/i);
+                    if (m) maxG = Math.max(maxG, Number(m[1]));
+                });
+                return maxG >= 3 ? maxG : 6;
+            })();
+            const groups = Array.from({ length: count }, (_, i) => ({ groupName: `Group ${i + 1}`, members: [] }));
             (participants || []).forEach(p => {
-                const match = (p.seating_group || '').match(/Group\s*(\d+)/i);
+                const match = (p.seating_group || p.shuffled_group || '').match(/Group\s*(\d+)/i);
                 if (!match) return;
-                const n = Number(match[1]);
-                if (n >= 1 && n <= 6) groups[n - 1].members.push(p);
+                const gn = Number(match[1]);
+                if (gn >= 1 && gn <= count) groups[gn - 1].members.push(p);
             });
             return groups;
         }
@@ -1106,13 +1257,16 @@
                     return;
                 }
                 if (!data.seating_ready || !data.participants || data.participants.length === 0) {
-                    seatingGroupsEl.innerHTML = '<div class="team-card">No seating arrangement generated yet. Register 6 complete teams and run Shuffle All Teams.</div>';
+                    const need = numTeamsExpected || 6;
+                    seatingGroupsEl.innerHTML = `<div class="team-card">No seating arrangement generated yet. Register ${need} complete teams (${need * 4} participants) and run Shuffle All Teams.</div>`;
                     return;
                 }
-                const groups = buildSixGroups(data.participants);
+                const inferredN = (data.teams_count && data.teams_count >= 3 && data.teams_count <= 6) ? data.teams_count : null;
+                const groups = buildGroups(data.participants, inferredN || numTeamsExpected);
                 const allValid = groups.every(g => g.members.length === 4);
                 if (!allValid) {
-                    seatingGroupsEl.innerHTML = '<div class="team-card">No seating arrangement generated yet. Register 6 complete teams and run Shuffle All Teams.</div>';
+                    const need = numTeamsExpected || 6;
+                    seatingGroupsEl.innerHTML = `<div class="team-card">No seating arrangement generated yet. Register ${need} complete teams (${need * 4} participants) and run Shuffle All Teams.</div>`;
                     return;
                 }
                 renderSeatingGroups(groups);
@@ -1152,7 +1306,7 @@
 
         /* ── PDF Export ── */
         function exportSeatingPDF() {
-            const groups = buildSixGroups(
+            const groups = buildGroups(
                 Array.from(document.querySelectorAll('#seating-groups .group-card')).flatMap(card => {
                     // re-parse from rendered DOM
                     return [];
@@ -1210,8 +1364,12 @@
             const teamPayload = await teamData.json();
             const teams = teamPayload && teamPayload.success === true ? (teamPayload.teams || []) : [];
 
-            if (teams.length !== 6 || teams.some(t => (t.members || []).length !== 4)) {
-                renderShuffleStatus('Shuffle requires 6 complete teams (24 participants).', 'error');
+            const expected = numTeamsExpected || teams.length || 6;
+            const expectedPart = expected * 4;
+
+            if (teams.length < 3 || teams.length > 6 || teams.some(t => (t.members || []).length !== 4)
+                || (numTeamsExpected && teams.length !== numTeamsExpected)) {
+                renderShuffleStatus(`Shuffle requires ${expected} complete teams (${expectedPart} participants).`, 'error');
                 return;
             }
 
@@ -1250,7 +1408,8 @@
                     }
                     seatingGroupsEl.innerHTML = '<div class="team-card">Shuffle failed. Try again.</div>';
                 } else {
-                    await showOverlaySuccess(data.groups_created || 6);
+                    const groupsCreated = data.groups_created || teams.length || numTeamsExpected || 6;
+                    await showOverlaySuccess(groupsCreated);
                     renderShuffleStatus(
                         `Shuffle completed. ${data.groups_created || 0} groups created.${data.assignments_written ? ' Tasks assigned.' : ''}` +
                         (forceReset ? ' (Retry mode: previous FizzBuzz data cleared.)' : ''),

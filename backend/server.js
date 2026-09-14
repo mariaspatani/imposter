@@ -926,12 +926,16 @@ app.get('/api/shuffle-layout', requireAdmin, async (req, res) => {
       (participants || []).filter(p => p.team_id === t.id).length === 4
     );
 
-    if (!teams || teams.length !== 6 || completeTeams.length !== 6 || (participants || []).length !== 24) {
-      return res.json({ success: true, participants: [], seating_ready: false });
+    const N = (teams || []).length;
+    const completeTeamsCount = completeTeams.length;
+    const expectedPart = N * 4;
+
+    if (!teams || N < 3 || N > 6 || completeTeamsCount !== N || (participants || []).length !== expectedPart) {
+      return res.json({ success: true, participants: [], seating_ready: false, teams_count: N, total_expected: expectedPart });
     }
 
     const shuffled = (participants || []).every(p => p.shuffle_group && p.shuffle_group !== 'Unassigned');
-    if (!shuffled) return res.json({ success: true, participants: [], seating_ready: false });
+    if (!shuffled) return res.json({ success: true, participants: [], seating_ready: false, teams_count: N, total_expected: expectedPart });
 
     const teamMap = {};
     (teams || []).forEach(t => { teamMap[t.id] = t.team_name; });
@@ -950,7 +954,7 @@ app.get('/api/shuffle-layout', requireAdmin, async (req, res) => {
       return (a.is_imposter ? 1 : 0) - (b.is_imposter ? 1 : 0);
     });
 
-    return res.json({ success: true, participants: seatRows, seating_ready: true });
+    return res.json({ success: true, participants: seatRows, seating_ready: true, teams_count: N, total_expected: expectedPart });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -978,7 +982,7 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       });
     }
 
-    // Validate 6 complete teams
+    // Validate N complete teams where N ∈ {3,4,5,6}
     const { data: allTeams,        error: tErr } = await supabase.from('teams').select('id, team_name, team_code');
     const { data: allParticipants, error: pErr } = await supabase.from('participants').select('*');
 
@@ -994,10 +998,11 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
     });
 
     const teamIds = Object.keys(byTeam);
-    if (teamIds.length !== 6 || teamIds.some(tid => byTeam[tid].length !== 4)) {
+    const N = teamIds.length;
+    if (N < 3 || N > 6 || teamIds.some(tid => byTeam[tid].length !== 4)) {
       return res.status(400).json({
         success: false,
-        message: 'Exactly 6 teams with 4 members each are required to run the shuffle.'
+        message: 'Exactly 3, 4, 5, or 6 teams with 4 members each are required to run the shuffle. Current: ' + N + ' registered team(s).'
       });
     }
 
@@ -1014,16 +1019,25 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
     // Step B: Shuffle imposters
     const shuffledImposters = [...imposters].sort(() => Math.random() - 0.5);
 
-    // Step C: Build 6 groups
-    const groups = Array.from({ length: 6 }, (_, i) => ({
+    // Step C: Build N groups
+    const groups = Array.from({ length: N }, (_, i) => ({
       groupName:   `Group ${i + 1}`,
       imposter:    shuffledImposters[i],
       specialists: []
     }));
 
-    // Step D: Assign specialists (no team conflict with imposter or other specialists in group)
+    // Step D: Assign specialists.
+    // Rules (N ≥ 4, strict):
+    //   1. No specialist from the imposter's original team (kept for all N)
+    //   2. At most one specialist from each original team per group (strict)
+    // Exception for N = 3 (combinatorial necessity):
+    //   Rule 1 still applies; relax rule 2 → allow up to 2 specialists from same original team per group.
+    //   (With 3 teams, N-1 = 2 other teams; 3 slots needed per group × 3 groups = 9 specialists,
+    //   3 specialists each from 2 other teams = each group necessarily has 2 from same team.)
     const allSpecialists = [];
     for (const tid of teamIds) allSpecialists.push(...specialistsByTeam[tid]);
+
+    const maxSameTeamPerGroup = (N === 3) ? 2 : 1;
 
     let assigned = false;
     for (let attempt = 0; attempt < 500 && !assigned; attempt++) {
@@ -1032,11 +1046,12 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
       let valid     = true;
 
       for (const specialist of pool) {
-        const eligible = working.filter(wg =>
-          wg.specialists.length < 3 &&
-          wg.imposter.team_id !== specialist.team_id &&
-          !wg.specialists.some(s => s.team_id === specialist.team_id)
-        );
+        const eligible = working.filter(wg => {
+          if (wg.specialists.length >= 3) return false;
+          if (wg.imposter.team_id === specialist.team_id) return false; // never allow
+          const sameTeamCount = wg.specialists.filter(s => s.team_id === specialist.team_id).length;
+          return sameTeamCount < maxSameTeamPerGroup;
+        });
         if (eligible.length === 0) { valid = false; break; }
         eligible[Math.floor(Math.random() * eligible.length)].specialists.push(specialist);
       }
@@ -1064,7 +1079,8 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
     const taskByNumber = {};
     tasks.forEach(t => { taskByNumber[t.task_number] = t; });
 
-    // Group assignment: Groups 1+4 → Task 1, Groups 2+5 → Task 2, Groups 3+6 → Task 3
+    // Cyclic task assignment: Group G -> Task ((G-1) mod 3) + 1
+    //   N=3: 1,2,3  N=4: 1,2,3,1  N=5: 1,2,3,1,2  N=6: 1,2,3,1,2,3
     const taskForGroup = groupName => {
       const n = parseInt((groupName.match(/\d+/) || ['1'])[0], 10);
       const taskNum = ((n - 1) % 3) + 1;
@@ -1161,8 +1177,8 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
     if (insertErr) return res.status(500).json({ success: false, message: 'Assignment insert failed: ' + insertErr.message });
 
     // Do NOT auto-lock — admin must click Lock Shuffle explicitly
-    auditLog('start_shuffle', 'all_participants', { groups_created: 6, force_reset: forceReset });
-    return res.json({ success: true, imposters_selected: 6, groups_created: 6, assignments_written: true, assignments_count: rows.length });
+    auditLog('start_shuffle', 'all_participants', { groups_created: N, force_reset: forceReset });
+    return res.json({ success: true, imposters_selected: N, groups_created: N, assignments_written: true, assignments_count: rows.length });
 
   } catch (err) {
     console.error('[start-shuffle]', err.message);
@@ -1517,10 +1533,11 @@ app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, a
 
 app.get('/api/admin/event-progress', requireAdmin, async (req, res) => {
   try {
-    const [assignRes, teamsRes, manualRes] = await Promise.all([
+    const [assignRes, teamsRes, manualRes, allTeamsRes] = await Promise.all([
       supabase.from('main_event_assignments').select('submission_status, fizzbuzz_score, main_event_score, original_team'),
       supabase.from('participants').select('id'),
-      supabase.from('manual_event_scores_v2').select('original_team')
+      supabase.from('manual_event_scores_v2').select('original_team'),
+      supabase.from('teams').select('id')
     ]);
 
     const all        = assignRes.data || [];
@@ -1531,16 +1548,20 @@ app.get('/api/admin/event-progress', requireAdmin, async (req, res) => {
     const uniqueTeams = [...new Set(all.map(r => r.original_team))].length;
     const manualTeams = (manualRes.data || []).length;
 
+    // Determine N: prefer number of registered teams, fallback to unique teams in assignments
+    const teamsCount = (allTeamsRes.data || []).length || uniqueTeams || 0;
+    const expectedPart = teamsCount > 0 ? teamsCount * 4 : (uniqueTeams > 0 ? uniqueTeams * 4 : 0);
+
     return res.json({
       success: true,
       progress: {
-        registration:      { done: totalPart >= 24,          label: `${totalPart}/24 participants` },
-        shuffle:           { done: all.length >= 24,         label: all.length >= 24 ? 'Groups assigned' : 'Not run' },
-        github_submission: { done: submitted >= 24,          label: `${submitted}/24 submitted` },
-        ai_evaluation:     { done: evaluated >= 24,          label: `${evaluated}/24 evaluated` },
+        registration:      { done: totalPart >= expectedPart, label: `${totalPart}/${expectedPart} participants` },
+        shuffle:           { done: all.length >= expectedPart, label: all.length >= expectedPart ? 'Groups assigned' : 'Not run' },
+        github_submission: { done: submitted >= expectedPart, label: `${submitted}/${expectedPart} submitted` },
+        ai_evaluation:     { done: evaluated >= expectedPart, label: `${evaluated}/${expectedPart} evaluated` },
         fizzbuzz:          { done: fizzDone >= all.length,   label: `${fizzDone}/${all.length} scored` },
         manual_events:     { done: manualTeams >= uniqueTeams, label: `${manualTeams}/${uniqueTeams} teams scored` },
-        final_podium:      { done: evaluated >= 24 && fizzDone >= all.length && manualTeams >= uniqueTeams, label: 'All events complete' }
+        final_podium:      { done: evaluated >= expectedPart && fizzDone >= all.length && manualTeams >= uniqueTeams, label: 'All events complete' }
       }
     });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }

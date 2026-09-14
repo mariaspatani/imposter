@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -51,6 +51,28 @@
         .start-btn { width:100%; padding:18px; background:linear-gradient(135deg,#c00d2e,var(--crimson-red)); color:#fff; font-family:'Orbitron',sans-serif; font-size:1.1rem; font-weight:900; letter-spacing:3px; text-transform:uppercase; border:2px solid #000; border-radius:50px; cursor:pointer; box-shadow:0 0 20px rgba(255,30,67,0.5); transition:all 0.2s; }
         .start-btn:hover:not(:disabled) { transform:scale(1.02); box-shadow:0 0 30px rgba(255,30,67,0.8); }
         .start-btn:disabled { opacity:0.45; cursor:not-allowed; }
+        /* Styled select for group fallback */
+        .styled-select {
+            background:rgba(8,7,11,0.95);
+            border:2px solid var(--violet);
+            border-radius:8px;
+            padding:10px 40px 10px 14px;
+            color:var(--cyan-accent);
+            font-family:'Orbitron',sans-serif;
+            font-size:0.9rem;
+            outline:none;
+            cursor:pointer;
+            appearance:none;
+            -webkit-appearance:none;
+            background-image:url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b21a8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat:no-repeat;
+            background-position:right 14px center;
+            transition:border-color 0.2s, box-shadow 0.2s;
+        }
+        .styled-select:focus {
+            border-color:var(--cyan-accent);
+            box-shadow:0 0 0 3px rgba(0,240,255,0.15);
+        }
         /* Waiting / status */
         .waiting-box { padding:22px; background:rgba(22,21,29,0.85); border:2px solid var(--violet); border-radius:12px; text-align:center; }
         .waiting-box .wt { font-family:'Orbitron',sans-serif; font-size:1.1rem; color:var(--cyan-accent); letter-spacing:2px; }
@@ -86,14 +108,8 @@
                     <div class="info-item">
                         <span class="info-label">Shuffled Group</span>
                         <span class="info-value" id="info-group">--</span>
-                        <select id="info-group-select" style="display:none;background:rgba(8,7,11,0.95);border:1px solid var(--cyan-accent);border-radius:6px;padding:6px 10px;color:var(--cyan-accent);font-family:'Orbitron',sans-serif;font-size:0.85rem;outline:none;" onchange="localStorage.setItem('fizzbuzz_group',this.value)">
+                        <select id="info-group-select" class="styled-select" style="display:none;" onchange="localStorage.setItem('fizzbuzz_group',this.value)">
                             <option value="">Select Group</option>
-                            <option value="Group 1">Group 1</option>
-                            <option value="Group 2">Group 2</option>
-                            <option value="Group 3">Group 3</option>
-                            <option value="Group 4">Group 4</option>
-                            <option value="Group 5">Group 5</option>
-                            <option value="Group 6">Group 6</option>
                         </select>
                     </div>
                 </div>
@@ -209,6 +225,50 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
             });
         }
 
+        function populateFallbackGroupSelect(){
+            var sel = document.getElementById('info-group-select');
+            if(!sel) return;
+
+            // 1. If we have an admin token, try fetching actual teams_count from shuffle-layout
+            var tryFetch = Promise.resolve(null);
+            try {
+                var token = sessionStorage.getItem('admin_token') || '';
+                if (token) {
+                    tryFetch = fetch(API_BASE+'/api/shuffle-layout', {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    }).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+                }
+            } catch(eFetch) {}
+
+            tryFetch.then(function(layout){
+                // Determine N dynamically
+                var fetchedN = 0, storedN = 0;
+                if (layout && layout.success && layout.teams_count && layout.teams_count >= 3 && layout.teams_count <= 6) {
+                    fetchedN = layout.teams_count;
+                }
+                try {
+                    var stored = localStorage.getItem('fizzbuzz_group') || '';
+                    var m = stored.match(/Group\s*(\d+)/i);
+                    if(m) storedN = parseInt(m[1],10) || 0;
+                } catch(e){}
+                var MAX_SUPPORTED = 6;
+                var n = fetchedN || Math.max(3, Math.min(MAX_SUPPORTED, storedN || MAX_SUPPORTED));
+                // Clear existing except placeholder
+                while(sel.options.length > 1) sel.remove(sel.options.length - 1);
+                for(var i = 1; i <= n; i++){
+                    var opt = document.createElement('option');
+                    opt.value = 'Group ' + i;
+                    opt.textContent = 'Group ' + i;
+                    sel.appendChild(opt);
+                }
+                // Restore selected value if exists
+                try {
+                    var prev = localStorage.getItem('fizzbuzz_group') || '';
+                    if(prev) sel.value = prev;
+                } catch(e2){}
+            });
+        }
+
         function toggleClassified(){
             var body=document.getElementById('classified-body'), arrow=document.getElementById('classified-arrow'), sub=document.getElementById('secret-subtitle');
             body.classList.toggle('open');
@@ -265,6 +325,7 @@ Write a program that prints numbers from <strong>1 to N</strong>.<br>
                     document.getElementById('info-group-select').style.display = 'none';
                     localStorage.setItem('fizzbuzz_group', shuffledGroup);
                 } else {
+                    populateFallbackGroupSelect();
                     document.getElementById('info-group').style.display = 'none';
                     document.getElementById('info-group-select').style.display = 'inline-block';
                 }

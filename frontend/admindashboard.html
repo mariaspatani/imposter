@@ -141,7 +141,7 @@
         <!-- ══ TAB: PARTICIPANTS ══ -->
         <div id="tab-participants" class="tab-content hidden">
             <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
-                <h3 class="text-xs font-orbitron font-bold text-white uppercase tracking-wider">All 24 Participants</h3>
+                <h3 class="text-xs font-orbitron font-bold text-white uppercase tracking-wider" id="heading-all-participants">All Participants</h3>
                 <div class="flex gap-2 flex-wrap">
                     <select id="f-status" onchange="renderParticipants()" class="text-xs font-orbitron bg-cardgray border border-bordergray rounded-lg px-3 py-1.5 text-gray-300 focus:outline-none focus:border-crimson-500">
                         <option value="all">All Status</option><option value="Pending">Pending</option><option value="Submitted">Submitted</option><option value="Evaluated">Evaluated</option>
@@ -187,7 +187,7 @@
         <div id="tab-fizzbuzz" class="tab-content hidden space-y-5">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-2xl font-orbitron font-bold text-emerald-400" id="fb-cnt-submitted">0</div><div class="text-xs text-gray-400 mt-1 font-orbitron">Groups Submitted</div></div>
-                <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-2xl font-orbitron font-bold text-rose-400"    id="fb-cnt-pending">6</div><div class="text-xs text-gray-400 mt-1 font-orbitron">Groups Pending</div></div>
+                <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-2xl font-orbitron font-bold text-rose-400"    id="fb-cnt-pending">0</div><div class="text-xs text-gray-400 mt-1 font-orbitron">Groups Pending</div></div>
                 <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-xl font-orbitron font-bold text-amber-400 truncate" id="fb-first">—</div><div class="text-xs text-gray-400 mt-1 font-orbitron">1st Submitted</div></div>
                 <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-xl font-orbitron font-bold text-cyan-400 truncate" id="fb-second">—</div><div class="text-xs text-gray-400 mt-1 font-orbitron">2nd Submitted</div></div>
             </div>
@@ -590,6 +590,16 @@ function renderOverview(){
     const failed    = allParticipants.filter(a=>a.evaluation_status==='Failed').length;
     const pending   = total - submitted;
 
+    // Determine expected participant count from event-progress if available, else compute from unique teams
+    const uniqueTeamCount = [...new Set(allParticipants.map(p=>p.original_team).filter(Boolean))].length;
+    const exp = (eventProgress && eventProgress.registration && eventProgress.registration.label)
+        ? (function(){
+               const m = eventProgress.registration.label.match(/\/(\d+)\s/);
+               return m ? parseInt(m[1],10) : (total || (uniqueTeamCount > 0 ? uniqueTeamCount * 4 : 0));
+           })()
+        : (total || (uniqueTeamCount > 0 ? uniqueTeamCount * 4 : 0));
+    const denom = exp;
+
     document.getElementById('cnt-registered').innerText = total||'--';
     document.getElementById('cnt-submitted').innerText  = submitted;
     document.getElementById('cnt-evaluated').innerText  = evaluated;
@@ -603,13 +613,13 @@ function renderOverview(){
 
     // Conditions preview
     document.getElementById('prev-status').innerHTML =
-        `<div class="flex justify-between"><span>Registered:</span><strong class="text-white">${total}/24</strong></div>`+
-        `<div class="flex justify-between"><span>GitHub Submitted:</span><strong class="text-amber-400">${submitted}/24</strong></div>`+
-        `<div class="flex justify-between"><span>AI Evaluated:</span><strong class="text-emerald-400">${evaluated}/24</strong></div>`+
-        `<div class="flex justify-between"><span>Pending:</span><strong class="text-rose-400">${pending}/24</strong></div>`;
+        `<div class="flex justify-between"><span>Registered:</span><strong class="text-white">${total}/${denom}</strong></div>`+
+        `<div class="flex justify-between"><span>GitHub Submitted:</span><strong class="text-amber-400">${submitted}/${denom}</strong></div>`+
+        `<div class="flex justify-between"><span>AI Evaluated:</span><strong class="text-emerald-400">${evaluated}/${denom}</strong></div>`+
+        `<div class="flex justify-between"><span>Pending:</span><strong class="text-rose-400">${pending}/${denom}</strong></div>`;
 
     // Team score preview
-    document.getElementById('prev-scores').innerHTML = teamScores.slice(0,6).map(t=>
+    document.getElementById('prev-scores').innerHTML = teamScores.map(t=>
         `<div class="flex justify-between items-center bg-black/60 px-2 py-1 rounded border border-bordergray">
             <span class="text-gray-300">${e(t.team)}</span>
             <span class="text-crimson-500 font-bold">${t.grand_total} pts</span>
@@ -826,7 +836,7 @@ function renderManual(){
         </div>`).join('');
     }
 
-    // ── FIZZBUZZ card — Group 1–6 accordion ──────────────────────────────────
+    // ── FIZZBUZZ card — Dynamic Group accordion (3–N groups based on registered count) ─
     // Source: allParticipants (from main_event_assignments) — always populated after shuffle
     const fbGroups = {};
     allParticipants.forEach(p => {
@@ -1263,7 +1273,11 @@ async function timerAction(eventKey, action, btn){
 // ══════════════════════════════════════════════════════════════════════════════
 function renderFizzBuzzMonitor(){
     const submitted = fizzSubmissions.length;
-    const pending   = Math.max(0, 6 - submitted);
+    // Build the set of all distinct shuffled groups from participants FIRST (source of truth for N)
+    const allGroups = [...new Set(allParticipants.map(p=>p.shuffled_group).filter(Boolean))].sort((a,b)=>
+        parseInt(a.replace(/\D/g,''))-parseInt(b.replace(/\D/g,'')));
+    const groupCount = allGroups.length || 0;
+    const pending = groupCount > 0 ? Math.max(0, groupCount - submitted) : 0;
 
     const el = (id) => document.getElementById(id);
     if(el('fb-cnt-submitted')) el('fb-cnt-submitted').innerText = submitted;
@@ -1274,9 +1288,11 @@ function renderFizzBuzzMonitor(){
     const container = el('fizzbuzz-groups');
     if(!container) return;
 
-    // Build a set of all 6 groups from participants
-    const allGroups = [...new Set(allParticipants.map(p=>p.shuffled_group).filter(Boolean))].sort((a,b)=>
-        parseInt(a.replace(/\D/g,''))-parseInt(b.replace(/\D/g,'')));
+    // Update Participants heading with dynamic count
+    const headingEl = el('heading-all-participants');
+    if(headingEl && allParticipants.length > 0){
+        headingEl.innerText = `All ${allParticipants.length} Participants`;
+    }
 
     const subByGroup = {};
     fizzSubmissions.forEach(s => { subByGroup[s.shuffled_group] = s; });
