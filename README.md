@@ -363,4 +363,4 @@ POST /api/start-shuffle          (with Authorization: Bearer <token>)
 
 ## 👥 Team
 
-Developed for **ASTHRA 2K26 Coding Event** — St. Joseph's College of Engineering & Technology.
+Developed for **ASTHRA 2K26 Coding Event** —St. Joseph's College of Engineering &Technology.
