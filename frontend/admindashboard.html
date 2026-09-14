@@ -61,7 +61,7 @@
                     <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-2xl font-orbitron font-bold text-cyan-400"    id="cnt-registered">--</div><div class="text-xs text-gray-400 mt-1 font-orbitron">Registered</div></div>
                     <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-2xl font-orbitron font-bold text-amber-400"   id="cnt-submitted">--</div><div class="text-xs text-gray-400 mt-1 font-orbitron">Submitted</div></div>
                     <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-2xl font-orbitron font-bold text-emerald-400" id="cnt-evaluated">--</div><div class="text-xs text-gray-400 mt-1 font-orbitron">Evaluated</div></div>
-                    <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-2xl font-orbitron font-bold text-rose-400"    id="cnt-pending">--</div><div class="text-xs text-gray-400 mt-1 font-orbitron">Pending</div></div>
+                    <div class="bg-cardgray border border-bordergray rounded-xl p-4 text-center"><div class="text-2xl font-orbitron font-bold text-rose-400"    id="cnt-pending">--</div><div class="text-xs text-gray-400 mt-1 font-orbitron" id="cnt-pending-label">Pending</div></div>
                 </div>
                 <!-- Recent submissions -->
                 <div class="bg-cardgray border border-bordergray rounded-2xl p-5 shadow-xl">
@@ -217,7 +217,7 @@
         </div>
         <div class="grid grid-cols-3 gap-2 text-center" id="fb-scores"></div>
         <div>
-            <div class="text-[10px] font-orbitron text-gray-400 mb-1 uppercase tracking-widest">AI Feedback</div>
+            <div id="fb-feedback-label" class="text-[10px] font-orbitron text-gray-400 mb-1 uppercase tracking-widest">AI Feedback</div>
             <div class="text-sm font-rajdhani text-gray-300 leading-relaxed bg-black/40 rounded-xl p-3 border border-bordergray" id="fb-text"></div>
         </div>
         <div class="flex justify-end">
@@ -395,10 +395,30 @@ async function fetchAll(){
             }
         });
 
+        // Collect failed endpoints and show/hide error banner
+        const failedEndpoints = [];
+        if(!r1.success) failedEndpoints.push('participants');
+        if(!r2.success) failedEndpoints.push('team-scores');
+        if(!r3.success) failedEndpoints.push('podium');
+        if(!r4.success) failedEndpoints.push('manual-scores');
+        if(!r5.success) failedEndpoints.push('event-progress');
+        if(!r6.success && !Array.isArray(r6)) failedEndpoints.push('event-timers');
+        if(!r7.success) failedEndpoints.push('fizzbuzz-submissions');
+
         const evaluated = allParticipants.filter(a=>a.submission_status==='Evaluated').length;
-        document.getElementById('sidebar-status').innerText=`${evaluated}/${allParticipants.length} Evaluated`;
+        const statusText = `${evaluated}/${allParticipants.length} Evaluated`;
+        document.getElementById('sidebar-status').innerText = failedEndpoints.length > 0
+            ? statusText + ' (stale)'
+            : statusText;
+
+        if(failedEndpoints.length > 0){
+            showErrorBanner('Failed endpoints: ' + failedEndpoints.join(', '));
+        } else {
+            hideErrorBanner();
+        }
+
         populateFilters();
-    } catch(ex){ console.error('fetchAll',ex); }
+    } catch(ex){ console.error('fetchAll',ex); showErrorBanner('Network error — cannot reach backend.'); }
 }
 
 async function loadTimers(){
@@ -451,10 +471,33 @@ function populateFilters(){
 }
 
 // ── Status badge ───────────────────────────────────────────────────────────────
-function badge(status){
+// evalStatus is optional — when 'Failed', shows a distinct warning badge
+function badge(status, evalStatus){
     if(status==='Evaluated') return '<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-orbitron">✅ Evaluated</span>';
-    if(status==='Submitted') return '<span class="px-2 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-orbitron">⏳ Submitted</span>';
+    if(status==='Submitted') {
+        if(evalStatus==='Failed') return '<span class="px-2 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 font-orbitron">⚠ Eval Failed</span>';
+        return '<span class="px-2 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-orbitron">⏳ Submitted</span>';
+    }
     return '<span class="px-2 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 font-orbitron">⬜ Pending</span>';
+}
+
+// ── Error banner helpers ──────────────────────────────────────────────────────
+function showErrorBanner(msg){
+    let banner = document.getElementById('_err-banner');
+    if(!banner){
+        banner = document.createElement('div');
+        banner.id = '_err-banner';
+        banner.className = 'bg-rose-900/80 border border-rose-500 text-rose-200 font-orbitron text-xs px-4 py-2 rounded-xl mx-auto max-w-7xl w-full';
+        banner.style.cssText = 'position:sticky;top:64px;z-index:50;';
+        const main = document.querySelector('main .p-6');
+        if(main) main.insertAdjacentElement('beforebegin', banner);
+    }
+    banner.innerHTML = '⚠ Data load error — ' + e(msg) + ' — some numbers may be stale.';
+}
+
+function hideErrorBanner(){
+    const banner = document.getElementById('_err-banner');
+    if(banner) banner.remove();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -464,11 +507,18 @@ function renderOverview(){
     const total     = allParticipants.length;
     const submitted = allParticipants.filter(a=>a.submission_status==='Submitted'||a.submission_status==='Evaluated').length;
     const evaluated = allParticipants.filter(a=>a.submission_status==='Evaluated').length;
+    const failed    = allParticipants.filter(a=>a.evaluation_status==='Failed').length;
     const pending   = total - submitted;
 
     document.getElementById('cnt-registered').innerText = total||'--';
     document.getElementById('cnt-submitted').innerText  = submitted;
     document.getElementById('cnt-evaluated').innerText  = evaluated;
+    document.getElementById('cnt-pending').innerText    = failed > 0 ? failed : pending;
+    // Show "Eval Failed" in red when failures exist, otherwise show "Pending"
+    const pendingLbl = document.getElementById('cnt-pending-label');
+    const pendingEl  = document.getElementById('cnt-pending');
+    if(pendingLbl) pendingLbl.innerText = failed > 0 ? 'Eval Failed' : 'Pending';
+    if(pendingEl)  pendingEl.style.color = failed > 0 ? '#f87171' : '';
     document.getElementById('cnt-pending').innerText    = pending;
 
     // Conditions preview
@@ -496,7 +546,7 @@ function renderOverview(){
                 ${p.submitted_at?`<div class="text-gray-500 text-[10px]">${new Date(p.submitted_at).toLocaleTimeString()}</div>`:''}
             </div>
             <div class="flex items-center gap-2">
-                ${badge(p.submission_status)}
+                ${badge(p.submission_status, p.evaluation_status)}
                 ${p.ai_score!=null?`<span class="font-orbitron font-bold text-cyan-400 text-sm">${p.ai_score}<span class="text-gray-500 text-[10px]">/100</span></span>`:''}
                 ${p.github_repo?`<a href="${e(p.github_repo)}" target="_blank" class="text-crimson-500 hover:underline text-[11px]">🔗</a>`:''}
             </div>
@@ -568,14 +618,14 @@ function renderParticipants(){
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap mb-1">
                     <span class="font-bold text-white">${e(p.participant_name)}</span>
-                    ${badge(p.submission_status)}
+                    ${badge(p.submission_status, p.evaluation_status)}
                     ${p.is_imposter?'<span class="px-2 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 font-orbitron">IMPOSTER</span>':''}
                 </div>
                 <div class="text-gray-400 text-xs font-mono">
                     ${e(p.original_team||'—')} → ${e(p.shuffled_group||'—')} · Task ${p.task_number||'?'} · Slot ${p.person_slot||'?'} · ${e(p.role_name||'—')}
                 </div>
                 ${p.submitted_at?`<div class="text-gray-500 text-[11px]">Submitted: ${new Date(p.submitted_at).toLocaleString()}</div>`:''}
-                <!-- Feature 6: individual scores -->
+                <!-- individual scores -->
                 <div class="flex gap-3 mt-1 text-[11px] font-mono">
                     ${p.main_event_score>0?`<span class="text-cyan-400">Main Event: <strong>${p.main_event_score}</strong></span>`:''}
                     ${p.fizzbuzz_score>0  ?`<span class="text-emerald-400">FizzBuzz: <strong>${p.fizzbuzz_score}</strong></span>`:''}
@@ -1404,25 +1454,78 @@ function renderFlow(){
     }).join('');
 }
 
-// ── Feedback modal ─────────────────────────────────────────────────────────────
+// ── Feedback / Error detail modal ─────────────────────────────────────────────
 function showFB(name,data){
-    document.getElementById('fb-name').innerText=name+' — AI Score: '+(data.ai_score!=null?data.ai_score:'--')+'/100';
-    const breakdowns=[
-        {l:'Task Completion',v:data.task_match_score,m:40},
-        {l:'UI / UX',v:data.ui_score,m:20},
-        {l:'Logic & Code',v:data.logic_score,m:20},
-        {l:'Responsiveness',v:data.code_quality_score,m:10},
-        {l:'Creativity',v:data.creativity_score,m:10}
-    ];
-    document.getElementById('fb-scores').innerHTML=breakdowns.map(b=>
-        `<div class="bg-black/40 border border-bordergray rounded-xl p-2">
-            <div class="text-[10px] font-orbitron text-gray-400 mb-1">${e(b.l)}</div>
-            <div class="text-base font-orbitron font-bold text-cyan-400">${b.v!=null?b.v:'--'}<span class="text-xs text-gray-500">/${b.m}</span></div>
-        </div>`).join('');
-    document.getElementById('fb-text').innerText=data.ai_feedback||'No feedback available.';
+    const isFailed = !!data.eval_failed;
+    document.getElementById('fb-name').innerText = isFailed
+        ? name + ' — ⚠ Evaluation Failed'
+        : name + ' — AI Score: '+(data.ai_score!=null?data.ai_score:'--')+'/100';
+
+    if(isFailed){
+        // Show error details instead of score breakdown
+        document.getElementById('fb-scores').innerHTML =
+            `<div class="col-span-3 bg-rose-950/30 border border-rose-500/30 rounded-xl p-3 text-left">
+                <div class="text-[10px] font-orbitron text-rose-400 mb-1 uppercase tracking-widest">What Happened</div>
+                <div class="text-xs font-rajdhani text-rose-300">The AI evaluation pipeline failed. Use the <strong>🔄 Retry AI</strong> button to try again, or use <strong>✏ Manual Score</strong> to enter a score manually.</div>
+            </div>`;
+    } else {
+        const breakdowns=[
+            {l:'Task Completion',v:data.task_match_score,m:40},
+            {l:'UI / UX',v:data.ui_score,m:20},
+            {l:'Logic & Code',v:data.logic_score,m:20},
+            {l:'Responsiveness',v:data.code_quality_score,m:10},
+            {l:'Creativity',v:data.creativity_score,m:10}
+        ];
+        document.getElementById('fb-scores').innerHTML=breakdowns.map(b=>
+            `<div class="bg-black/40 border border-bordergray rounded-xl p-2">
+                <div class="text-[10px] font-orbitron text-gray-400 mb-1">${e(b.l)}</div>
+                <div class="text-base font-orbitron font-bold text-cyan-400">${b.v!=null?b.v:'--'}<span class="text-xs text-gray-500">/${b.m}</span></div>
+            </div>`).join('');
+    }
+    const label = document.getElementById('fb-feedback-label');
+    if(label) label.textContent = isFailed ? 'Error Message' : 'AI Feedback';
+    document.getElementById('fb-text').innerText=data.ai_feedback||(isFailed?'No error details recorded.':'No feedback available.');
     document.getElementById('fb-modal').classList.remove('hidden');
 }
 function closeFB(){ document.getElementById('fb-modal').classList.add('hidden'); }
+
+// ── Manual main-event score override ─────────────────────────────────────────
+// Opens a small inline prompt. Uses the existing admin endpoint /api/admin/update-main-event-score.
+function openManualMainScore(pid, name, currentScore){
+    const score = prompt(
+        'Manual Main Event Score for ' + name + '\n' +
+        'Current score: ' + currentScore + '\n\n' +
+        'Enter a score (0–100). This overrides the AI score and marks the submission as Evaluated.',
+        currentScore || ''
+    );
+    if(score === null) return; // cancelled
+    const val = Number(score);
+    if(isNaN(val) || val < 0 || val > 100){ alert('Please enter a number between 0 and 100.'); return; }
+    saveManualMainScore(pid, name, val);
+}
+
+async function saveManualMainScore(pid, name, score){
+    try {
+        const r = await fetch(API+'/api/admin/update-main-event-score', {
+            method:'POST', headers:authHeaders(),
+            body: JSON.stringify({ participant_id: pid, score })
+        });
+        const d = await r.json();
+        if(r.ok && d.success){
+            // Also mark submission_status as Evaluated so scores show up in podium
+            await fetch(API+'/api/admin/mark-evaluated', {
+                method:'POST', headers:authHeaders(),
+                body: JSON.stringify({ participant_id: pid })
+            }).catch(()=>{});
+            await fetchAll(); renderParticipants(); renderOverview(); renderPodium();
+            alert('✅ Manual score saved for ' + name + ': ' + score + '/100');
+        } else {
+            alert('❌ Failed to save score: ' + (d.message || 'Unknown error'));
+        }
+    } catch(ex){
+        alert('❌ Network error: ' + ex.message);
+    }
+}
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 // Named function so doLogin() can call it after authentication succeeds

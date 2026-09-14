@@ -1418,14 +1418,14 @@ app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, a
     if (!asgn.github_repo) return res.status(400).json({ success: false, message: 'No GitHub repository has been submitted yet.' });
 
     // Only start if not already actively evaluating (prevents duplicate parallel jobs on rapid double-click)
-    if (asgn.submission_status === 'Evaluating' || asgn.evaluation_status === 'Evaluating') {
+    if (asgn.evaluation_status === 'Evaluating') {
       return res.status(409).json({ success: false, message: 'Evaluation is already in progress for ' + asgn.participant_name + '. Please wait.' });
     }
 
-    // Mark as evaluating and respond immediately
+    // Mark as evaluating first so we get a clean start; guard against a concurrent request
     const { data: guardUpdate } = await supabase
       .from('main_event_assignments')
-      .update({ evaluation_status: 'Evaluating' })
+      .update({ evaluation_status: 'Evaluating', evaluation_started_at: new Date().toISOString() })
       .eq('participant_id', participantId)
       .neq('evaluation_status', 'Evaluating')
       .select('participant_id');
@@ -1914,7 +1914,43 @@ app.post('/api/admin/update-main-event-score', requireAdmin, async (req, res) =>
       main_event_score
     }).eq('participant_id', participant_id);
     if (error) return res.status(500).json({ success: false, message: error.message });
+
+    // Also mark the submission as Evaluated so it counts in the podium and overview stats.
+    // Only set ai_score/ai_feedback when AI never ran (ai_score IS NULL) — don't overwrite a real AI result.
+    await supabase.from('main_event_assignments').update({
+      submission_status: 'Evaluated',
+      evaluation_status: 'Evaluated',
+      ai_score: main_event_score,
+      ai_feedback: 'Manually scored by admin.',
+    }).eq('participant_id', participant_id).is('ai_score', null);
+
     auditLog('update_main_score', participant_id, { score: main_event_score });
+    return res.json({ success: true });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── POST /api/admin/mark-evaluated ────────────────────────────────────────────
+// Marks a participant's submission as Evaluated. Called by the frontend after
+// a manual score entry to ensure the participant counts in the podium. Idempotent.
+
+app.post('/api/admin/mark-evaluated', requireAdmin, async (req, res) => {
+  try {
+    const participant_id = String(req.body?.participant_id || '').trim();
+    if (!isUUID(participant_id)) return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
+
+    const { data: current } = await supabase
+      .from('main_event_assignments')
+      .select('participant_id')
+      .eq('participant_id', participant_id)
+      .maybeSingle();
+
+    if (!current) return res.status(404).json({ success: false, message: 'Assignment not found.' });
+
+    await supabase.from('main_event_assignments').update({
+      submission_status: 'Evaluated',
+      evaluation_status: 'Evaluated',
+    }).eq('participant_id', participant_id);
+
     return res.json({ success: true });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });

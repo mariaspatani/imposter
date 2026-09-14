@@ -347,12 +347,8 @@
                 ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
                 ctx.fillStyle = star.color;
                 ctx.fill();
-
                 star.y += star.speed;
-                if (star.y > canvas.height) {
-                    star.y = 0;
-                    star.x = Math.random() * canvas.width;
-                }
+                if (star.y > canvas.height) { star.y = 0; star.x = Math.random() * canvas.width; }
             });
             requestAnimationFrame(animateSpace);
         }
@@ -360,22 +356,17 @@
 
         // 2. Stopwatch Logic (MM:SS)
         const startTime = Date.now();
-        let timerInterval = null;
+        let timerInterval = setInterval(updateTimer, 1000);
 
         function updateTimer() {
             const elapsedMs = Date.now() - startTime;
             const totalSeconds = Math.floor(elapsedMs / 1000);
             const minutes = Math.floor(totalSeconds / 60);
             const seconds = totalSeconds % 60;
-
-            const formattedMin = String(minutes).padStart(2, '0');
-            const formattedSec = String(seconds).padStart(2, '0');
-
-            document.getElementById('timer').textContent = `${formattedMin}:${formattedSec}`;
+            document.getElementById('timer').textContent =
+                String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
         }
-
         updateTimer();
-        timerInterval = setInterval(updateTimer, 1000);
 
         function escHtml(s) {
             return String(s == null ? '' : s)
@@ -383,20 +374,35 @@
                 .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
+        // Pre-fill participant name from localStorage on load (Task 6.1 / Req 8, 23)
+        document.addEventListener('DOMContentLoaded', function() {
+            var stored = localStorage.getItem('participant_name') || '';
+            document.getElementById('participant-id').value = stored;
+        });
+
         // 3. Form Submission
         async function submitTask(event) {
             event.preventDefault();
 
-            const recordTime      = document.getElementById('timer').textContent;
             const participantName = document.getElementById('participant-id').value.trim();
             const submitBtn       = document.getElementById('submit-btn');
             const statusMsg       = document.getElementById('status-msg');
 
             if (!participantName) return;
 
+            // Freeze timer and lock UI BEFORE the fetch so double-clicks cannot send two different times
+            const recordTime = document.getElementById('timer').textContent;
+            clearInterval(timerInterval);
+
+            const dot = document.getElementById('live-dot');
+            dot.style.animation       = 'none';
+            dot.style.backgroundColor = '#555';
+            dot.style.boxShadow       = 'none';
+
             submitBtn.disabled     = true;
             submitBtn.textContent  = 'SUBMITTING...';
             submitBtn.style.opacity = '0.7';
+            document.getElementById('participant-id').disabled = true;
 
             try {
                 const res  = await fetch(API_BASE + '/api/code-imposter/submit', {
@@ -404,22 +410,14 @@
                     headers: { 'Content-Type': 'application/json' },
                     body:    JSON.stringify({
                         participant_name: participantName,
-                        completion_time:  recordTime
+                        completion_time:  recordTime,
+                        participant_id:   localStorage.getItem('participant_id') || ''
                     })
                 });
                 const data = await res.json();
 
-                // Freeze timer regardless of server response
-                clearInterval(timerInterval);
+                // Timer stays frozen regardless of server response — do NOT restart timerInterval
 
-                // Turn off glowing live dot
-                const dot = document.getElementById('live-dot');
-                dot.style.animation       = 'none';
-                dot.style.backgroundColor = '#555';
-                dot.style.boxShadow       = 'none';
-
-                // Lock input field
-                document.getElementById('participant-id').disabled = true;
                 submitBtn.style.opacity = '0.5';
                 submitBtn.style.cursor  = 'not-allowed';
 
@@ -433,7 +431,6 @@
                         'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
                         'Final Time: <strong>' + escHtml(recordTime) + ' (MM:SS)</strong>';
                 } else if (res.status === 409 && data && data.already_submitted) {
-                    // Already submitted — show the existing time
                     submitBtn.textContent     = 'ALREADY SUBMITTED';
                     statusMsg.style.display   = 'block';
                     statusMsg.style.borderColor = 'var(--green-glow)';
@@ -443,7 +440,7 @@
                         'Participant: <strong>' + escHtml(participantName) + '</strong><br>' +
                         'Recorded Time: <strong>' + escHtml(data.completion_time || recordTime) + '</strong>';
                 } else {
-                    // Server rejected — still lock UI (time is recorded) but show warning
+                    // Server rejected — UI stays locked, timer stays frozen, show warning
                     submitBtn.textContent     = 'SUBMITTED';
                     statusMsg.style.display   = 'block';
                     statusMsg.style.borderColor = '#ff8c00';
@@ -456,11 +453,7 @@
                         '<small>' + serverMsg + '</small>';
                 }
             } catch (err) {
-                // Network error — still freeze/lock but warn
-                clearInterval(timerInterval);
-                const dot = document.getElementById('live-dot');
-                dot.style.animation = 'none'; dot.style.backgroundColor = '#555'; dot.style.boxShadow = 'none';
-                document.getElementById('participant-id').disabled = true;
+                // Network error — UI stays locked, timer stays frozen
                 submitBtn.textContent   = 'SUBMITTED (OFFLINE)';
                 submitBtn.style.opacity = '0.5';
                 submitBtn.style.cursor  = 'not-allowed';
