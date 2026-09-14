@@ -1610,149 +1610,109 @@ app.post('/api/admin/fizzbuzz/run-code', requireAdmin, async (req, res) => {
       return res.status(404).json({ success: false, message: 'No FizzBuzz submission found for group: ' + shuffled_group });
     }
 
-    const language    = lang_override || fzSub.language || 'python';
+    const language    = (lang_override || fzSub.language || 'python').toLowerCase().trim();
     const code        = fzSub.fizz_output;
     const submittedBy = fzSub.submitted_by;
 
-    // Judge0 CE language IDs
-    // Full list: https://ce.judge0.com/languages
-    const langIdMap = {
-      'python':     71,   // Python 3
-      'python3':    71,
-      'javascript': 63,   // JavaScript (Node.js)
-      'js':         63,
-      'node':       63,
-      'java':       62,   // Java
-      'c':          50,   // C (GCC)
-      'cpp':        54,   // C++ (GCC)
-      'c++':        54,
-      'csharp':     51,   // C#
-      'c#':         51,
-      'ruby':       72,   // Ruby
-      'go':         60,   // Go
-      'rust':       73,   // Rust
-      'kotlin':     78,   // Kotlin
-      'typescript': 74,   // TypeScript
-      'ts':         74,
-      'php':        68,   // PHP
-      'swift':      83,   // Swift
-      'r':          80,   // R
-    };
-
-    const langId = langIdMap[language.toLowerCase().trim()];
-    if (!langId) {
-      return res.status(400).json({ success: false, message: 'Unsupported language: ' + language + '. Supported: Python, JavaScript, Java, C, C++, C#, Ruby, Go, Rust, Kotlin, TypeScript, PHP, Swift, R' });
+    // 1) Vercel Check
+    if (process.env.VERCEL) {
+       return res.json({
+           success: false,
+           error: "Execution on Vercel is disabled. Please run locally.",
+           message: "Execution on Vercel is disabled. Please run locally."
+       });
     }
 
-    const judge0Base = (process.env.JUDGE0_URL || 'https://ce.judge0.com').replace(/\/$/, '');
+    // 2) Local child_process Execution
+    const { exec } = require('child_process');
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    const crypto = require('crypto');
 
-    // Safe Base64 → UTF-8 decoder. Judge0 stores fields as base64 when
-    // base64_encoded=true; some submissions contain non-UTF-8 bytes, so we
-    // fall back to Latin-1 ('binary') when strict UTF-8 decoding fails.
-    const decodeJudge64 = (s) => {
-      if (s == null || s === '') return '';
-      if (typeof s !== 'string') return String(s);
-      try {
-        return Buffer.from(s, 'base64').toString('utf-8');
-      } catch (_) {
-        try {
-          return Buffer.from(s, 'base64').toString('binary');
-        } catch (__) {
-          return String(s);
-        }
-      }
-    };
+    const tmpDir = os.tmpdir();
+    const runId = crypto.randomBytes(8).toString('hex');
+    let cmd = '';
+    let workDir = tmpDir;
 
-    // Base64-encoder for INPUT fields (required by Judge0 when base64_encoded=true)
-    const encodeJudge64 = (s) => {
-      if (s == null) return '';
-      return Buffer.from(String(s), 'utf-8').toString('base64');
-    };
-
-    const payload = {
-      source_code: encodeJudge64(code),
-      language_id: langId,
-      stdin:       encodeJudge64('')
-    };
-
-    // Judge0 status IDs that mean "still processing"
-    const PROCESSING_STATUSES = new Set([1, 2]); // In Queue, Processing
-    const MAX_POLLS = 30;
-    const POLL_INTERVAL_MS = 1000;
-
-    async function pollSubmission(token) {
-      for (let i = 0; i < MAX_POLLS; i++) {
-        const pollRes = await axios.get(
-          judge0Base + `/submissions/${token}?base64_encoded=true`,
-          { timeout: 10000 }
-        );
-        const pd = pollRes.data || {};
-        const statusId = pd.status?.id;
-        if (statusId != null && !PROCESSING_STATUSES.has(statusId)) {
-          return pd;
-        }
-        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-      }
-      throw new Error('Judge0 submission timed out after polling.');
-    }
-
-    let d;
     try {
-      // Step 1: POST submission. Use wait=true as a best-effort, but always
-      // be prepared to fall back to polling because the public Judge0 CE
-      // instance may honour wait=true only up to an internal time budget.
-      const createRes = await axios.post(
-        judge0Base + '/submissions?base64_encoded=true&wait=true',
-        payload,
-        { timeout: 25000, headers: { 'Content-Type': 'application/json' } }
-      );
-      const cd = createRes.data || {};
-      const statusId = cd.status?.id;
-      const hasToken = typeof cd.token === 'string' && cd.token.length > 0;
-
-      if (statusId != null && !PROCESSING_STATUSES.has(statusId)) {
-        // wait=true returned a completed result — great.
-        d = cd;
-      } else if (hasToken) {
-        // Still processing (or wait was ignored) — poll for the result.
-        d = await pollSubmission(cd.token);
-      } else {
-        // No status, no token: something was returned inline (possibly an
-        // error payload), surface it as-is so the decoded fields propagate.
-        d = cd;
-      }
-    } catch (axErr) {
-      const msg = axErr.response?.data?.error || axErr.message || 'Judge0 unreachable';
-      console.error('[run-code] judge0 error:', msg);
-      return res.status(502).json({ success: false, message: 'Code execution service error: ' + msg });
+        workDir = fs.mkdtempSync(path.join(tmpDir, `run_${runId}_`));
+    } catch (e) {
+        return res.status(500).json({ success: false, message: 'Failed to create temp directory' });
     }
 
-    const stdout         = decodeJudge64(d.stdout);
-    const stderr         = decodeJudge64(d.stderr);
-    const compile_output = decodeJudge64(d.compile_output);
-    const message        = decodeJudge64(d.message);
-    const statusDesc     = d.status?.description || 'Unknown';
-    const statusId       = d.status?.id;
-    // Accepted (3) is the only clear "success" status id. Treat Runtime Error
-    // (10) etc as non-zero so the frontend can colour output correctly.
-    const exitCode       = statusId === 3 ? 0 : (statusId || null);
+    if (language === 'python' || language === 'python3') {
+        const filePath = path.join(workDir, `script.py`);
+        fs.writeFileSync(filePath, code);
+        cmd = `python "${filePath}"`;
+    } else if (language === 'javascript' || language === 'js' || language === 'node') {
+        const filePath = path.join(workDir, `script.js`);
+        fs.writeFileSync(filePath, code);
+        cmd = `node "${filePath}"`;
+    } else if (language === 'c') {
+        const filePath = path.join(workDir, `main.c`);
+        const exeName = process.platform === 'win32' ? 'main.exe' : 'main';
+        const executablePath = path.join(workDir, exeName);
+        fs.writeFileSync(filePath, code);
+        cmd = `gcc "${filePath}" -o "${executablePath}" && "${executablePath}"`;
+    } else if (language === 'cpp' || language === 'c++') {
+        const filePath = path.join(workDir, `main.cpp`);
+        const exeName = process.platform === 'win32' ? 'main.exe' : 'main';
+        const executablePath = path.join(workDir, exeName);
+        fs.writeFileSync(filePath, code);
+        cmd = `g++ "${filePath}" -o "${executablePath}" && "${executablePath}"`;
+    } else if (language === 'java') {
+        const filePath = path.join(workDir, `Main.java`);
+        fs.writeFileSync(filePath, code);
+        cmd = `cd "${workDir}" && javac Main.java && java Main`;
+    } else {
+        return res.status(400).json({ success: false, message: 'Unsupported language: ' + language });
+    }
 
-    const errorTail = [stderr, compile_output, message]
-      .map(t => t && t.trim() ? t.trim() : '')
-      .filter(Boolean)
-      .join('\n---\n');
-    const output = (stdout + (errorTail ? '\n--- error ---\n' + errorTail : '')).trim();
+    exec(cmd, { timeout: 8000 }, (error, stdout, stderr) => {
+        // Cleanup
+        try {
+            fs.rmSync(workDir, { recursive: true, force: true });
+        } catch (e) {
+            console.error("Cleanup error:", e);
+        }
 
-    return res.json({
-      success: true, shuffled_group, language, submitted_by: submittedBy,
-      stdout, stderr, compile_output, message,
-      output:    output || '(no output)',
-      exit_code: exitCode,
-      status:    statusDesc
+        if (error && error.killed) {
+            return res.json({
+                success: false,
+                error: "Execution timed out after 8 seconds.",
+                message: "Execution timed out after 8 seconds."
+            });
+        }
+
+        const outStr = stdout ? String(stdout) : '';
+        const errStr = stderr ? String(stderr) : '';
+        const compilerMsg = error && error.code !== 0 ? error.message : '';
+        
+        let finalOutput = outStr;
+        if (errStr || compilerMsg) {
+            finalOutput += (finalOutput ? '\n--- error ---\n' : '');
+            if (errStr) finalOutput += errStr;
+            if (compilerMsg && !errStr.includes(compilerMsg)) finalOutput += '\n' + compilerMsg;
+        }
+
+        return res.json({
+            success: true,
+            shuffled_group,
+            language,
+            submitted_by: submittedBy,
+            stdout: outStr,
+            stderr: errStr,
+            compile_output: '',
+            message: compilerMsg,
+            output: finalOutput || '(no output)',
+            exit_code: error ? error.code : 0,
+            status: error ? 'Error' : 'Accepted'
+        });
     });
   } catch (err) {
     console.error('[run-code]', err.message);
-    return res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message, error: err.message });
   }
 });
 
