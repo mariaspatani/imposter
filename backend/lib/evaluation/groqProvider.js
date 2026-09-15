@@ -4,6 +4,7 @@ const axios = require('axios');
 const { EvaluationProvider } = require('./provider');
 const { DEFAULT_MAIN_EVENT_CRITERIA, validateCriteriaScores } = require('./criteria');
 const { downloadAndReadRepo } = require('../githubRepo');
+const { getKeyPool } = require('./groqKeyPool');
 
 function parseJsonSafe(raw) {
   if (!raw) return null;
@@ -18,14 +19,16 @@ function parseJsonSafe(raw) {
 }
 
 class GroqEvaluationProvider extends EvaluationProvider {
-  constructor({ apiKey, model } = {}) {
+  constructor({ model } = {}) {
     super();
-    this.apiKey = apiKey || process.env.GROQ_API_KEY;
+    // No longer stores a single apiKey — keys are managed by the pool.
+    // Accept an explicit model override (e.g. from tests) or fall back to env.
     this.model = model || process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
   }
 
   async evaluateSubmission(input) {
-    if (!this.apiKey) throw new Error('GROQ_API_KEY is not configured.');
+    const pool = getKeyPool();
+
     const assignment = input.assignment || {};
     const criteria = (input.criteria && input.criteria.length)
       ? input.criteria
@@ -49,10 +52,10 @@ class GroqEvaluationProvider extends EvaluationProvider {
     if (runtimeEvidence && runtimeEvidence.runtime_available) {
       const runtimeMode = runtimeEvidence.runtime_mode || 'UNKNOWN';
       const consoleErrors = (runtimeEvidence.console_errors || []).slice(0, 5).join('; ') || 'None';
-      const domResults = (runtimeEvidence.dom_assertions || []).slice(0, 5).map(d => 
+      const domResults = (runtimeEvidence.dom_assertions || []).slice(0, 5).map(d =>
         `${d.test}: ${d.result}`
       ).join(', ') || 'None';
-      
+
       runtimeSection = `
 RUNTIME EVALUATION EVIDENCE (${runtimeMode}):
 - Page loaded: ${runtimeEvidence.page_loaded ? 'YES' : 'NO'}
@@ -135,47 +138,79 @@ ${codeSnippet}
     let lastError = null;
     let response = null;
 
+    // Outer loop: iterate over models
     for (const modelToUse of modelsToTry) {
-      try {
-        response = await axios.post(
-          'https://api.groq.com/openai/v1/chat/completions',
-          {
-            model: modelToUse,
-            temperature: 0.1,
-            max_tokens: 700,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: buildUserPrompt(promptCode) },
-            ],
-            response_format: { type: 'json_object' },
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${this.apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            timeout: 60_000,
-          }
-        );
-        if (response?.data?.choices?.[0]?.message?.content) {
+      // Inner loop: iterate over pool keys for this model on rate-limit errors
+      let keyAttempts = 0;
+      const maxKeyAttempts = pool.size + 1; // guard against infinite key cycling
+
+      while (keyAttempts < maxKeyAttempts) {
+        keyAttempts++;
+        let currentKey;
+        try {
+          currentKey = pool.next();
+        } catch (poolErr) {
+          // All keys exhausted for this model — break to next model
+          lastError = poolErr;
           break;
         }
-      } catch (err) {
-        lastError = err;
-        const status = err.response?.status;
-        const errCode = err.response?.data?.error?.code;
-        const is404 = status === 404 || errCode === 'model_not_found';
-        const isRateOrPayload = status === 413 || status === 429 || errCode === 'rate_limit_exceeded';
 
-        if (is404 || isRateOrPayload) {
-          console.warn(`[Groq] Model ${modelToUse} failed (${status || err.message}), trying fallback...`);
-          if (isRateOrPayload && promptCode.length > 8000) {
-            promptCode = promptCode.slice(0, 8000) + '\n\n// [Further truncated due to token limits]';
+        try {
+          response = await axios.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+              model: modelToUse,
+              temperature: 0.1,
+              max_tokens: 700,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: buildUserPrompt(promptCode) },
+              ],
+              response_format: { type: 'json_object' },
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${currentKey}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 60_000,
+            }
+          );
+
+          if (response?.data?.choices?.[0]?.message?.content) {
+            pool.markSuccess(currentKey);
+            break; // success — exit the key loop
           }
-          continue;
+        } catch (err) {
+          lastError = err;
+          const status = err.response?.status;
+          const errCode = err.response?.data?.error?.code;
+          const is404 = status === 404 || errCode === 'model_not_found';
+          const isRateOrPayload = status === 413 || status === 429 || errCode === 'rate_limit_exceeded';
+
+          if (isRateOrPayload) {
+            // Rate-limited on this key — cool it down and try the next key
+            pool.markRateLimited(currentKey);
+            if (promptCode.length > 8000) {
+              promptCode = promptCode.slice(0, 8000) + '\n\n// [Further truncated due to token limits]';
+            }
+            console.warn(`[Groq] Key …${currentKey.slice(-6)} rate-limited on model ${modelToUse}, rotating key…`);
+            continue; // retry with next key
+          }
+
+          if (is404) {
+            // Model not found — no point retrying this model with other keys
+            console.warn(`[Groq] Model ${modelToUse} not found (404), trying next model…`);
+            break; // break key loop → outer model loop advances
+          }
+
+          // Any other error (network, auth, etc.) — propagate immediately
+          throw err;
         }
-        throw err;
       }
+
+      // If we got a valid response, stop trying models
+      if (response?.data?.choices?.[0]?.message?.content) break;
     }
 
     if (!response?.data?.choices?.[0]?.message?.content) {
