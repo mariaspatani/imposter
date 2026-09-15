@@ -5,8 +5,10 @@ const cors      = require('cors');
 const crypto    = require('crypto');
 const path      = require('path');
 const axios     = require('axios');
-require('dotenv').config();
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+if (!process.env.VERCEL) {
+    require('dotenv').config();
+    require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+}
 
 const { createClient }    = require('@supabase/supabase-js');
 const { validateRepository } = require('./aiScorer');
@@ -1671,7 +1673,7 @@ app.post('/api/admin/fizzbuzz/run-code', requireAdmin, async (req, res) => {
 
     if (!GROQ_KEY) {
         console.error('[run-code] Groq API configuration missing.');
-        return res.json({ success: false, message: "Groq API configuration missing." });
+        return res.json({ success: false, message: "Groq API configuration missing.", error: "Groq API configuration missing." });
     }
 
     console.log(`[run-code] API key exists. Language: ${language}, Code length: ${code.length}`);
@@ -1698,7 +1700,7 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
         });
     } catch (e) {
         console.error('[run-code] Fetch error:', e.message);
-        return res.json({ success: false, message: `Groq fetch failed: ${e.message}` });
+        return res.json({ success: false, message: `Groq fetch failed: ${e.message}`, error: `Groq fetch failed: ${e.message}` });
     }
 
     console.log(`[run-code] Groq response status: ${groqResponse.status}`);
@@ -1706,7 +1708,7 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
     if (!groqResponse.ok) {
         const errText = await groqResponse.text().catch(() => 'No text returned');
         console.error(`[run-code] Groq API Error: ${groqResponse.status} - ${errText}`);
-        return res.json({ success: false, message: `Groq API Error: ${groqResponse.status} - ${errText}` });
+        return res.json({ success: false, message: `Groq API Error: ${groqResponse.status} - ${errText}`, error: `Groq API Error: ${groqResponse.status} - ${errText}` });
     }
 
     let groqData;
@@ -1716,7 +1718,7 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
         output = (groqData.choices?.[0]?.message?.content || '').trim();
     } catch (e) {
         console.error('[run-code] Malformed response from Groq:', e.message);
-        return res.json({ success: false, message: "Malformed response from Groq." });
+        return res.json({ success: false, message: "Malformed response from Groq.", error: "Malformed response from Groq." });
     }
 
     const isError = /error|exception|traceback|segmentation fault|syntaxerror|typeerror|referenceerror/i.test(output);
