@@ -26,6 +26,12 @@ const {
   buildTaskCohortReport,
   buildFullEventCohortReport
 } = require('./lib/evaluation/cohortComparator');
+const {
+  build12AuthoritativePairs,
+  syncPairsWithDatabase,
+  evaluatePairById,
+  evaluateAllReadyPairs
+} = require('./lib/evaluation/pairwiseEvaluator');
 
 // ── Startup validation ────────────────────────────────────────────────────────
 
@@ -1583,6 +1589,60 @@ const handleCohortReport = async (req, res) => {
 
 app.get('/api/admin/cohort-report', requireAdmin, handleCohortReport);
 app.get('/api/admin/cohort-report/:taskNumber', requireAdmin, handleCohortReport);
+
+// ── GET /api/admin/pairwise-pairs ─────────────────────────────────────────────
+// Returns the 12 canonical competition pairs (3 tasks x 4 roles x 2 candidates)
+app.get('/api/admin/pairwise-pairs', requireAdmin, async (req, res) => {
+  try {
+    const { data: assignments, error: asgnErr } = await supabase
+      .from('main_event_assignments')
+      .select('*')
+      .order('task_number')
+      .order('person_slot');
+
+    if (asgnErr) return res.status(500).json({ success: false, message: asgnErr.message });
+
+    const synced = await syncPairsWithDatabase(supabase, assignments || []);
+    return res.json({
+      success: true,
+      total_pairs: synced.length,
+      pairs: synced,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── POST /api/admin/evaluate-pair/:pairId ─────────────────────────────────────
+// Triggers evaluation of a specific same-task same-role pair
+app.post('/api/admin/evaluate-pair/:pairId', requireAdmin, async (req, res) => {
+  try {
+    const pairId = req.params.pairId;
+    if (!pairId) return res.status(400).json({ success: false, message: 'pairId is required.' });
+
+    const result = await evaluatePairById(supabase, pairId, {
+      retry: req.body?.retry === true,
+      force: req.body?.force === true,
+    });
+
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── POST /api/admin/evaluate-ready-pairs ──────────────────────────────────────
+// Evaluates all pairs currently in READY or NEEDS_RECOVERY state
+app.post('/api/admin/evaluate-ready-pairs', requireAdmin, async (req, res) => {
+  try {
+    const result = await evaluateAllReadyPairs(supabase, {
+      force: req.body?.force === true,
+    });
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // ── GET /api/admin/event-progress ─────────────────────────────────────────────
 

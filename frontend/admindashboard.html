@@ -26,6 +26,7 @@
         <button onclick="switchTab('manual')"       id="nav-manual"       class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">✏️ Manual Scoring</button>
         <button onclick="switchTab('podium')"       id="nav-podium"       class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">🏆 Team Podium</button>
         <button onclick="switchTab('flow')"         id="nav-flow"         class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">👁️ Event Flow</button>
+        <button onclick="switchTab('pairwise')"     id="nav-pairwise"     class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">⚔️ Pairwise (12 Pairs)</button>
     </nav>
     <div class="p-4 border-t border-bordergray bg-black/50 text-xs font-orbitron">
         <div class="flex items-center justify-between text-gray-400 mb-1">
@@ -218,6 +219,31 @@
             </div>
         </div>
 
+        <!-- ══ TAB: PAIRWISE COMPETITIVE EVALUATION (12 PAIRS) ══ -->
+        <div id="tab-pairwise" class="tab-content hidden space-y-6">
+            <div class="flex items-center justify-between flex-wrap gap-4 border-b border-bordergray pb-4">
+                <div>
+                    <h2 class="text-sm font-orbitron font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <span class="text-crimson-500">⚔️</span> Pairwise Competitive Scoring (12 Canonical Pairs)
+                    </h2>
+                    <p class="text-xs font-rajdhani text-gray-400 mt-1">
+                        Compares participants with the exact same task and role (Group 1 & 4 for Task 1; Group 2 & 5 for Task 2; Group 3 & 6 for Task 3).
+                    </p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="renderPairwiseDashboard()" class="text-xs font-orbitron px-3 py-2 rounded-xl bg-cardgray text-gray-300 border border-bordergray hover:bg-bordergray transition-all">
+                        ↻ Refresh Pairs
+                    </button>
+                    <button onclick="evaluateAllReadyPairs()" id="btn-eval-ready-pairs" class="text-xs font-orbitron px-4 py-2 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-600 hover:text-white transition-all">
+                        ▶ Evaluate Ready Pairs
+                    </button>
+                </div>
+            </div>
+            <div id="pairwise-pairs-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div class="text-xs text-gray-400 font-orbitron py-6">Loading 12 competition pairs...</div>
+            </div>
+        </div>
+
     </div>
 </main>
 
@@ -351,7 +377,7 @@ function switchTab(id){
         b.className='w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all';
     });
     document.getElementById('nav-'+id).className='w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-crimson-600 text-white shadow-lg shadow-crimson-600/30 transition-all';
-    const titles={overview:'Overview',participants:'Participants',timers:'Event Timers',fizzbuzz:'FizzBuzz Monitor',manual:'Manual Scoring',podium:'Team Podium',flow:'Event Flow'};
+    const titles={overview:'Overview',participants:'Participants',timers:'Event Timers',fizzbuzz:'FizzBuzz Monitor',manual:'Manual Scoring',podium:'Team Podium',flow:'Event Flow',pairwise:'Pairwise Competition (12 Pairs)'};
     document.getElementById('header-title').innerText=titles[id]||id;
     if(id==='overview')     renderOverview();
     if(id==='participants') renderParticipants();
@@ -360,6 +386,7 @@ function switchTab(id){
     if(id==='manual')       renderManual();
     if(id==='podium')       renderPodium();
     if(id==='flow')         renderFlow();
+    if(id==='pairwise')     renderPairwiseDashboard();
 }
 
 function toggleAcc(id){
@@ -537,6 +564,7 @@ function renderCurrentTab(){
     if(id==='manual')       renderManual();
     if(id==='podium')       renderPodium();
     if(id==='flow')         renderFlow();
+    if(id==='pairwise')     renderPairwiseDashboard();
 }
 
 function populateFilters(){
@@ -1620,6 +1648,201 @@ async function saveManualMainScore(pid, name, score){
         }
     } catch(ex){
         alert('❌ Network error: ' + ex.message);
+    }
+// ── Pairwise Competitive Evaluation ─────────────────────────────────────────
+let pairwisePairs = [];
+
+async function renderPairwiseDashboard() {
+    const grid = document.getElementById('pairwise-pairs-grid');
+    if (!grid) return;
+
+    try {
+        const res = await apiFetch(API + '/api/admin/pairwise-pairs', { headers: authHeaders() });
+        const d = await res.json();
+        if (!d.success) {
+            grid.innerHTML = `<div class="col-span-full text-rose-400 font-orbitron text-xs text-center py-8">Failed to load pairs: ${e(d.message || 'Unknown error')}</div>`;
+            return;
+        }
+
+        pairwisePairs = d.pairs || [];
+        if (pairwisePairs.length === 0) {
+            grid.innerHTML = `<div class="col-span-full text-gray-400 font-orbitron text-xs text-center py-8">No canonical pairs registered yet. Run group shuffle first.</div>`;
+            return;
+        }
+
+        const statusBadges = {
+            'EVALUATED':      '<span class="px-2 py-0.5 rounded text-[10px] font-orbitron font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">EVALUATED</span>',
+            'READY':          '<span class="px-2 py-0.5 rounded text-[10px] font-orbitron font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/40">READY</span>',
+            'EVALUATING':     '<span class="px-2 py-0.5 rounded text-[10px] font-orbitron font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse">EVALUATING</span>',
+            'WAITING_FOR_BOTH':'<span class="px-2 py-0.5 rounded text-[10px] font-orbitron font-bold bg-gray-500/20 text-gray-400 border border-gray-500/40">WAITING</span>',
+            'NEEDS_RECOVERY': '<span class="px-2 py-0.5 rounded text-[10px] font-orbitron font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">NEEDS RECOVERY</span>',
+            'FAILED':         '<span class="px-2 py-0.5 rounded text-[10px] font-orbitron font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">FAILED</span>',
+        };
+
+        grid.innerHTML = pairwisePairs.map((p, idx) => {
+            const candA = p.participant_a || allParticipants.find(x => x.participant_id === p.participant_a_id) || {};
+            const candB = p.participant_b || allParticipants.find(x => x.participant_id === p.participant_b_id) || {};
+
+            const roleName = p.role_name || (p.is_imposter ? 'Imposter' : `Specialist ${p.person_slot}`);
+            const badge = statusBadges[p.status] || `<span class="px-2 py-0.5 rounded text-[10px] font-orbitron border border-bordergray text-gray-400">${e(p.status)}</span>`;
+            const imposterBadge = p.is_imposter ? '<span class="px-2 py-0.5 rounded text-[10px] font-orbitron font-bold bg-crimson-500/20 text-crimson-400 border border-crimson-500/40">🕵️ IMPOSTER</span>' : '';
+
+            const scoreA = p.participant_a_score != null ? `${p.participant_a_score}/100` : (candA.main_event_score != null ? `${candA.main_event_score}/100` : '—');
+            const scoreB = p.participant_b_score != null ? `${p.participant_b_score}/100` : (candB.main_event_score != null ? `${candB.main_event_score}/100` : '—');
+
+            let actionButton = '';
+            if (p.status === 'READY') {
+                actionButton = `<button onclick="evaluateSinglePair('${p.id}')" id="btn-pair-${p.id}" class="w-full text-xs font-orbitron py-2 px-3 rounded-xl bg-cyan-600/20 text-cyan-400 border border-cyan-500/40 hover:bg-cyan-600 hover:text-white transition-all font-bold">⚔️ Evaluate Pair</button>`;
+            } else if (p.status === 'EVALUATED') {
+                actionButton = `<button onclick="evaluateSinglePair('${p.id}', true)" id="btn-pair-${p.id}" class="w-full text-xs font-orbitron py-1.5 px-3 rounded-xl bg-cardgray text-gray-300 border border-bordergray hover:bg-bordergray transition-all">↻ Re-evaluate Pair</button>`;
+            } else if (p.status === 'NEEDS_RECOVERY' || p.status === 'FAILED') {
+                actionButton = `<button onclick="evaluateSinglePair('${p.id}', true)" id="btn-pair-${p.id}" class="w-full text-xs font-orbitron py-2 px-3 rounded-xl bg-rose-600/20 text-rose-400 border border-rose-500/40 hover:bg-rose-600 hover:text-white transition-all font-bold">⚠️ Retry Evaluation</button>`;
+            } else if (p.status === 'EVALUATING') {
+                actionButton = `<button disabled class="w-full text-xs font-orbitron py-2 px-3 rounded-xl bg-amber-600/20 text-amber-400 border border-amber-500/40 cursor-wait">⏳ Evaluating...</button>`;
+            } else {
+                actionButton = `<button disabled class="w-full text-xs font-orbitron py-2 px-3 rounded-xl bg-black/40 text-gray-500 border border-bordergray cursor-not-allowed">Waiting for Submissions</button>`;
+            }
+
+            const compSummary = p.comparison_summary ? `
+                <div class="mt-3 p-2.5 rounded-lg bg-black/40 border border-bordergray text-[11px] text-gray-300 font-rajdhani">
+                    <div class="text-[9px] font-orbitron text-gray-400 uppercase tracking-wider mb-1">Judge Notes</div>
+                    <div class="line-clamp-2 hover:line-clamp-none transition-all cursor-pointer" title="${e(p.comparison_summary)}">${e(p.comparison_summary)}</div>
+                </div>
+            ` : '';
+
+            return `
+            <div class="bg-cardgray border border-bordergray rounded-2xl p-4 shadow-xl flex flex-col justify-between space-y-4 hover:border-gray-600 transition-all">
+                <!-- Header -->
+                <div>
+                    <div class="flex items-center justify-between pb-2 border-b border-bordergray">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-orbitron font-bold text-cyan-400">TASK ${p.task_number}</span>
+                            <span class="text-gray-500">•</span>
+                            <span class="text-xs font-orbitron text-gray-300 truncate max-w-[120px]">${e(roleName)}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            ${imposterBadge}
+                            ${badge}
+                        </div>
+                    </div>
+
+                    <!-- Comparison Candidates -->
+                    <div class="grid grid-cols-2 gap-3 mt-3">
+                        <!-- Candidate A -->
+                        <div class="bg-black/30 rounded-xl p-3 border border-bordergray/70 space-y-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[9px] font-orbitron text-gray-400 uppercase">Cand A</span>
+                                <span class="text-[10px] font-orbitron font-bold ${p.participant_a_score != null ? 'text-emerald-400' : 'text-gray-500'}">${scoreA}</span>
+                            </div>
+                            <div class="text-xs font-orbitron font-bold text-white truncate" title="${e(candA.participant_name || 'Candidate A')}">
+                                ${e(candA.participant_name || 'Slot ' + p.person_slot)}
+                            </div>
+                            <div class="text-[10px] font-rajdhani text-gray-400 truncate">
+                                ${e(candA.shuffled_group || '—')} (${e(candA.original_team || '—')})
+                            </div>
+                            <div class="text-[10px] font-mono truncate pt-1">
+                                ${candA.github_repo ? `<a href="${e(candA.github_repo)}" target="_blank" class="text-cyan-400 hover:underline">GitHub ↗</a>` : '<span class="text-gray-600">No repo</span>'}
+                            </div>
+                        </div>
+
+                        <!-- Candidate B -->
+                        <div class="bg-black/30 rounded-xl p-3 border border-bordergray/70 space-y-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[9px] font-orbitron text-gray-400 uppercase">Cand B</span>
+                                <span class="text-[10px] font-orbitron font-bold ${p.participant_b_score != null ? 'text-emerald-400' : 'text-gray-500'}">${scoreB}</span>
+                            </div>
+                            <div class="text-xs font-orbitron font-bold text-white truncate" title="${e(candB.participant_name || 'Candidate B')}">
+                                ${e(candB.participant_name || 'Slot ' + p.person_slot)}
+                            </div>
+                            <div class="text-[10px] font-rajdhani text-gray-400 truncate">
+                                ${e(candB.shuffled_group || '—')} (${e(candB.original_team || '—')})
+                            </div>
+                            <div class="text-[10px] font-mono truncate pt-1">
+                                ${candB.github_repo ? `<a href="${e(candB.github_repo)}" target="_blank" class="text-cyan-400 hover:underline">GitHub ↗</a>` : '<span class="text-gray-600">No repo</span>'}
+                            </div>
+                        </div>
+                    </div>
+
+                    ${compSummary}
+                </div>
+
+                <!-- Footer Action -->
+                <div class="pt-2 border-t border-bordergray/50">
+                    ${actionButton}
+                </div>
+            </div>`;
+        }).join('');
+    } catch (ex) {
+        console.error('renderPairwiseDashboard', ex);
+        grid.innerHTML = `<div class="col-span-full text-rose-400 font-orbitron text-xs text-center py-8">Error rendering pairwise dashboard: ${e(ex.message)}</div>`;
+    }
+}
+
+async function evaluateSinglePair(pairId, retry = false) {
+    if (!pairId) return;
+    if (retry && !confirm('Re-evaluate this competition pair? This will run a fresh pairwise comparison with Groq.')) {
+        return;
+    }
+
+    const btn = document.getElementById('btn-pair-' + pairId);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Evaluating...';
+    }
+
+    try {
+        const res = await fetch(API + '/api/admin/evaluate-pair/' + pairId, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ retry, force: retry })
+        });
+        const d = await res.json();
+        if (d.success) {
+            alert(`✅ Pair evaluated successfully!\n\nScore A: ${d.participant_a_score}/100\nScore B: ${d.participant_b_score}/100`);
+            await fetchAll();
+            await renderPairwiseDashboard();
+        } else {
+            alert(`❌ Evaluation failed: ${d.message || 'Unknown error'}`);
+            await renderPairwiseDashboard();
+        }
+    } catch (ex) {
+        alert('❌ Network error: ' + ex.message);
+        await renderPairwiseDashboard();
+    }
+}
+
+async function evaluateAllReadyPairs() {
+    if (!confirm('Evaluate all READY pairs concurrently? This will evaluate each eligible pair using Groq pairwise comparison.')) {
+        return;
+    }
+
+    const btn = document.getElementById('btn-eval-ready-pairs');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Evaluating Ready Pairs...';
+    }
+
+    try {
+        const res = await fetch(API + '/api/admin/evaluate-ready-pairs', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ force: false })
+        });
+        const d = await res.json();
+        if (d.success) {
+            alert(`✅ Pairwise evaluation run complete!\n\nTotal Evaluated: ${d.evaluated}\nSkipped: ${d.skipped}\nFailed: ${d.failed}`);
+            await fetchAll();
+            await renderPairwiseDashboard();
+        } else {
+            alert(`❌ Batch evaluation failed: ${d.message || 'Unknown error'}`);
+        }
+    } catch (ex) {
+        alert('❌ Network error: ' + ex.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '▶ Evaluate Ready Pairs';
+        }
     }
 }
 
