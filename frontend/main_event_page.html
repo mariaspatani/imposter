@@ -553,6 +553,12 @@
         // On page load: fetch assignment, render UI, and start FizzBuzz gate polling if needed.
         // lockForm override (above) handles starting _fbGateInterval automatically when called.
         loadAssignment();
+
+        // ── Back Button Protection ────────────────────────────────────────────
+        history.pushState(null, null, window.location.href);
+        window.addEventListener('popstate', function(event) {
+            history.pushState(null, null, window.location.href);
+        });
     </script>
 </body>
 </html>

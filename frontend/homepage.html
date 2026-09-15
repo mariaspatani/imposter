@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -80,28 +80,61 @@
         @keyframes emergencyPulse { 0%{transform:scale(1)} 50%{transform:scale(1.08)} 100%{transform:scale(1)} }
         
         /* Role Reveal */
-        #role-reveal { display:none; position:fixed; inset:0; z-index:2000; justify-content:center; align-items:center; flex-direction:column; text-align:center; padding:30px 20px; }
-        #role-reveal.active { display:flex; animation:revealFadeIn 0.45s ease both; }
-        @keyframes revealFadeIn { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
+        #role-reveal {
+            --r: 0; --g: 255; --b: 255; /* Default fallback */
+            display:none; position:fixed; inset:0; z-index:2000; justify-content:center; align-items:center; flex-direction:column; text-align:center; padding:30px 20px;
+            background-color: var(--bg-black);
+            background-image: radial-gradient(ellipse at center, rgba(var(--r), var(--g), var(--b), 0.15) 0%, var(--bg-black) 100%);
+            width: 100vw; height: 100vh;
+        }
+        body.role-reveal-active { overflow: hidden; }
+        #role-reveal.active { display:flex; animation:revealFadeIn 0.5s ease both; }
+        @keyframes revealFadeIn { from{opacity:0;} to{opacity:1;} }
         #role-reveal::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.08) 3px,rgba(0,0,0,0.08) 4px); pointer-events:none; z-index:0; }
-        #role-reveal>* { position:relative; z-index:1; }
-        #role-reveal.imposter { background:radial-gradient(ellipse at center,#2e0008 0%,#0a0003 100%); }
-        #role-reveal.specialist { background:radial-gradient(ellipse at center,#001f0a 0%,#000d04 100%); }
-        .reveal-icon { font-size:5.5rem; margin-bottom:16px; line-height:1; animation:iconPop 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.15s both; }
+        
+        .reveal-card {
+            position:relative; z-index:1; display:flex; flex-direction:column; align-items:center;
+            background: rgba(var(--r), var(--g), var(--b), 0.05);
+            border: 1px solid rgba(var(--r), var(--g), var(--b), 0.25);
+            padding: 50px 30px; border-radius: 20px;
+            box-shadow: 0 0 50px rgba(var(--r), var(--g), var(--b), 0.15), inset 0 0 20px rgba(var(--r), var(--g), var(--b), 0.05);
+            backdrop-filter: blur(12px);
+            animation: cardSlideUp 0.6s cubic-bezier(0.25, 1, 0.5, 1) 0.1s both;
+            width: 100%; max-width: 700px;
+        }
+        @keyframes cardSlideUp { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
+
+        .reveal-icon {
+            width: 80px; height: 80px; margin-bottom:20px; border-radius: 50%;
+            background: rgb(var(--r), var(--g), var(--b));
+            box-shadow: 0 0 30px rgba(var(--r), var(--g), var(--b), 0.8), inset 0 0 15px rgba(255,255,255,0.6);
+            animation: iconPop 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.3s both;
+        }
         @keyframes iconPop { from{transform:scale(0.3);opacity:0} to{transform:scale(1);opacity:1} }
-        .reveal-role-label { font-family:'Orbitron',sans-serif; font-size:clamp(1.7rem,6vw,3.2rem); font-weight:900; letter-spacing:3px; text-transform:uppercase; line-height:1.15; margin-bottom:22px; animation:textSlideUp 0.4s ease 0.3s both; }
-        @keyframes textSlideUp { from{transform:translateY(18px);opacity:0} to{transform:translateY(0);opacity:1} }
-        #role-reveal.imposter .reveal-role-label { color:#ff1e43; text-shadow:0 0 20px rgba(255,30,67,1),0 0 50px rgba(255,30,67,0.55),0 0 100px rgba(255,30,67,0.25); }
-        #role-reveal.specialist .reveal-role-label { color:#00ff66; text-shadow:0 0 20px rgba(0,255,102,1),0 0 50px rgba(0,255,102,0.55),0 0 100px rgba(0,255,102,0.25); }
-        .reveal-warning { font-family:'Orbitron',sans-serif; font-size:clamp(0.7rem,2vw,0.9rem); letter-spacing:2px; text-transform:uppercase; padding:10px 24px; border-radius:8px; margin-bottom:40px; animation:textSlideUp 0.4s ease 0.45s both; }
-        #role-reveal.imposter .reveal-warning { color:#ffbfd0; background:rgba(255,30,67,0.1); border:1px solid rgba(255,30,67,0.35); }
-        #role-reveal.specialist .reveal-warning { color:#b5f5d5; background:rgba(0,255,102,0.07); border:1px solid rgba(0,255,102,0.3); }
-        .reveal-actions { display:flex; flex-direction:column; align-items:center; gap:14px; animation:textSlideUp 0.4s ease 0.55s both; }
-        .reveal-continue-btn { font-family:'Orbitron',sans-serif; font-size:0.85rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; padding:13px 40px; border-radius:50px; border:none; cursor:pointer; transition:transform 0.15s ease,box-shadow 0.15s ease; }
-        #role-reveal.imposter .reveal-continue-btn { background:linear-gradient(90deg,#c00d2e,#ff1e43); color:#fff; box-shadow:0 0 20px rgba(255,30,67,0.5); }
-        #role-reveal.specialist .reveal-continue-btn { background:linear-gradient(90deg,#00a83a,#00ff66); color:#001a09; box-shadow:0 0 20px rgba(0,255,102,0.45); }
+        
+        .reveal-role-label {
+            font-family:'Orbitron',sans-serif; font-size:clamp(1.5rem,5vw,3rem); font-weight:900; letter-spacing:3px; text-transform:uppercase; line-height:1.2; margin-bottom:20px; 
+            color: rgb(var(--r), var(--g), var(--b)); 
+            text-shadow:0 0 20px rgba(var(--r), var(--g), var(--b),1),0 0 50px rgba(var(--r), var(--g), var(--b),0.55);
+            animation: textFadeIn 0.5s ease 0.5s both;
+        }
+        
+        .reveal-warning {
+            font-family:'Orbitron',sans-serif; font-size:clamp(0.75rem,2vw,1rem); letter-spacing:2px; text-transform:uppercase; padding:12px 24px; border-radius:8px; margin-bottom:35px;
+            color: #ffffff; background: rgba(var(--r), var(--g), var(--b), 0.1); border: 1px solid rgba(var(--r), var(--g), var(--b), 0.5); box-shadow: 0 0 15px rgba(var(--r), var(--g), var(--b), 0.25);
+            animation: textFadeIn 0.5s ease 0.65s both;
+        }
+        
+        .reveal-actions { display:flex; flex-direction:column; align-items:center; gap:16px; animation: textFadeIn 0.5s ease 0.8s both; }
+        @keyframes textFadeIn { from{opacity:0;} to{opacity:1;} }
+        
+        .reveal-continue-btn {
+            font-family:'Orbitron',sans-serif; font-size:0.9rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; padding:15px 45px; border-radius:50px; border:none; cursor:pointer; transition:transform 0.15s ease,box-shadow 0.15s ease;
+            background: linear-gradient(90deg, rgba(var(--r), var(--g), var(--b), 0.5), rgb(var(--r), var(--g), var(--b))); 
+            color: #ffffff; text-shadow: 0 0 8px rgba(0,0,0,0.8); box-shadow: 0 0 25px rgba(var(--r), var(--g), var(--b), 0.6);
+        }
         .reveal-continue-btn:hover { transform:translateY(-2px) scale(1.04); }
-        .reveal-countdown { font-family:'Orbitron',sans-serif; font-size:0.78rem; letter-spacing:2px; color:rgba(255,255,255,0.38); text-transform:uppercase; }
+        .reveal-countdown { font-family:'Orbitron',sans-serif; font-size:0.8rem; letter-spacing:2px; color:rgba(255,255,255,0.5); text-transform:uppercase; }
     </style>
 </head>
 <body>
@@ -183,12 +216,14 @@
 
     <!-- Role Reveal Full-Screen Overlay -->
     <div id="role-reveal">
-        <div class="reveal-icon" id="reveal-icon"></div>
-        <div class="reveal-role-label" id="reveal-role-label"></div>
-        <div class="reveal-warning" id="reveal-warning"></div>
-        <div class="reveal-actions">
-            <button class="reveal-continue-btn" id="reveal-continue-btn" onclick="proceedToEvent()">CONTINUE</button>
-            <div class="reveal-countdown" id="reveal-countdown">Redirecting in 5...</div>
+        <div class="reveal-card">
+            <div class="reveal-icon" id="reveal-icon"></div>
+            <div class="reveal-role-label" id="reveal-role-label"></div>
+            <div class="reveal-warning" id="reveal-warning"></div>
+            <div class="reveal-actions">
+                <button class="reveal-continue-btn" id="reveal-continue-btn" onclick="proceedToEvent()">CONTINUE</button>
+                <div class="reveal-countdown" id="reveal-countdown">Redirecting in 5...</div>
+            </div>
         </div>
     </div>
 
@@ -255,14 +290,30 @@
             var countdown = document.getElementById('reveal-countdown');
             var isImposter = (role === 'Imposter');
 
-            overlay.className = isImposter ? 'active imposter' : 'active specialist';
+            var themes = [
+                [0, 240, 255],   // Cyan
+                [168, 85, 247],  // Purple
+                [0, 255, 102],   // Green
+                [255, 113, 206], // Pink
+                [255, 140, 0],   // Orange
+                [59, 130, 246],  // Blue
+                [253, 224, 71],  // Yellow
+                [20, 184, 166]   // Teal
+            ];
+            var randomTheme = themes[Math.floor(Math.random() * themes.length)];
+            overlay.style.setProperty('--r', randomTheme[0]);
+            overlay.style.setProperty('--g', randomTheme[1]);
+            overlay.style.setProperty('--b', randomTheme[2]);
+
+            document.body.classList.add('role-reveal-active');
+            overlay.className = 'active';
+
+            icon.textContent = ''; // Styled with CSS only
 
             if (isImposter) {
-                icon.textContent    = '\uD83D\uDD34';
                 label.textContent   = 'YOU ARE THE IMPOSTER';
                 warning.textContent = '\u26A0\uFE0F  Do not reveal this to anyone.';
             } else {
-                icon.textContent    = '\uD83D\uDFE2';
                 label.textContent   = 'YOU ARE A SPECIALIST';
                 warning.textContent = '\uD83D\uDD0D  Find the Imposter in your group.';
             }
@@ -270,6 +321,7 @@
             var secondsLeft = 5;
             countdown.textContent = 'Redirecting in ' + secondsLeft + '...';
 
+            if (revealTimer) clearInterval(revealTimer);
             revealTimer = setInterval(function() {
                 secondsLeft -= 1;
                 if (secondsLeft <= 0) {
@@ -281,6 +333,9 @@
                     countdown.textContent = 'Redirecting in ' + secondsLeft + '...';
                 }
             }, 1000);
+            
+            // Push state for back button protection
+            history.pushState(null, null, window.location.href);
         }
 
         function proceedToEvent() {
@@ -369,6 +424,14 @@
                 alert('EMERGENCY MEETING CALLED!\nCheck Programming Lab 2 for Impostors before time runs out!');
             }, 200);
         }
+
+        // Back button protection
+        window.addEventListener('popstate', function(event) {
+            var existingRole = sessionStorage.getItem('participant_role') || localStorage.getItem('participant_role');
+            if (existingRole && document.body.classList.contains('role-reveal-active')) {
+                history.pushState(null, null, window.location.href);
+            }
+        });
     </script>
 </body>
 </html>
