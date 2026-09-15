@@ -26,12 +26,22 @@
         .start-btn { font-family:'Orbitron',sans-serif; background:linear-gradient(90deg,var(--crimson-red),var(--cherry-red)); color:#fff; border:2px solid #000; padding:8px 16px; border-radius:10px; font-weight:900; letter-spacing:1px; cursor:pointer; box-shadow:0 6px 18px rgba(192,13,46,0.25); transition:transform 0.15s ease,box-shadow 0.15s ease; }
         .start-btn:hover { transform:translateY(-3px); box-shadow:0 10px 26px rgba(255,30,67,0.32); }
         .start-btn:active { transform:translateY(0); }
+        /* Continue event button (shown in header when participant already logged in + revealed) */
+        .continue-event-btn { font-family:'Orbitron',sans-serif; background:linear-gradient(90deg,#00c853,#00e676); color:#001a0a; border:2px solid #000; padding:8px 18px; border-radius:10px; font-weight:900; letter-spacing:1px; cursor:pointer; box-shadow:0 0 16px rgba(0,255,102,0.45); transition:transform 0.15s ease,box-shadow 0.15s ease; white-space:nowrap; display:none; }
+        .continue-event-btn:hover { transform:translateY(-3px); box-shadow:0 0 28px rgba(0,255,102,0.65); }
         /* Participant session pill */
         .participant-pill { display:none; align-items:center; gap:10px; background:rgba(192,13,46,0.12); border:1px solid rgba(255,30,67,0.35); border-radius:50px; padding:6px 14px 6px 10px; }
         .participant-pill-dot { width:8px; height:8px; border-radius:50%; background:var(--green-accent); box-shadow:0 0 6px var(--green-accent); flex-shrink:0; }
         .participant-pill-name { font-family:'Orbitron',sans-serif; font-size:0.72rem; color:var(--text-light); letter-spacing:1px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .participant-pill-logout { font-family:'Orbitron',sans-serif; font-size:0.65rem; color:var(--crimson-red); background:transparent; border:1px solid rgba(255,30,67,0.4); border-radius:20px; padding:3px 10px; cursor:pointer; letter-spacing:1px; transition:background 0.15s,color 0.15s; white-space:nowrap; }
         .participant-pill-logout:hover { background:var(--crimson-red); color:#fff; }
+        /* Resume banner (injected into hero when participant accidentally lands on homepage) */
+        .resume-banner { display:flex; flex-direction:column; align-items:center; gap:14px; background:rgba(0,200,83,0.07); border:1px solid rgba(0,255,102,0.35); border-radius:14px; padding:22px 28px; margin:0 auto; max-width:520px; text-align:center; animation:resumeFadeIn 0.4s ease both; }
+        @keyframes resumeFadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        .resume-banner-title { font-family:'Orbitron',sans-serif; font-size:1rem; font-weight:900; letter-spacing:2px; color:var(--green-accent); text-shadow:0 0 12px rgba(0,255,102,0.5); }
+        .resume-banner-sub { font-size:0.88rem; color:#aaa; letter-spacing:0.5px; line-height:1.5; }
+        .resume-banner-btn { font-family:'Orbitron',sans-serif; background:linear-gradient(90deg,#00c853,#00e676); color:#001a0a; border:2px solid #000; padding:12px 34px; border-radius:50px; font-weight:900; font-size:0.95rem; letter-spacing:2px; cursor:pointer; box-shadow:0 0 20px rgba(0,255,102,0.5); transition:transform 0.15s,box-shadow 0.15s; }
+        .resume-banner-btn:hover { transform:scale(1.04); box-shadow:0 0 32px rgba(0,255,102,0.75); }
         .hero { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:50px 20px 30px; position:relative; }
         .title-container { margin-bottom:20px; text-transform:uppercase; }
         .event-subtitle { font-family:'Orbitron',sans-serif; color:var(--violet); letter-spacing:4px; font-size:1.2rem; margin-bottom:5px; text-shadow:0 0 10px rgba(107,33,168,0.8); }
@@ -156,6 +166,8 @@
                 <span class="participant-pill-name" id="participant-pill-name"></span>
                 <button class="participant-pill-logout" onclick="participantLogout()">LOGOUT</button>
             </div>
+            <!-- Shown after role was revealed — takes participant back to event page -->
+            <button class="continue-event-btn" id="continue-event-btn" onclick="window.location.href='main_event_page.html'">▶ CONTINUE EVENT</button>
             <button class="start-btn" id="start-btn" onclick="openAuthModal()">START</button>
         </div>
     </header>
@@ -166,6 +178,8 @@
             <h1 class="main-title">THE IMPOSTER<br>PROJECT</h1>
         </div>
         <div class="host-dept">THERE IS 1 IMPOSTER AMONG US. CAN YOUR TEAM FIND IT?</div>
+        <!-- Resume banner injected here by JS when participant accidentally navigates back -->
+        <div id="resume-banner-slot"></div>
     </section>
 
     <div class="container">
@@ -335,6 +349,9 @@
             var secondsLeft = 5;
             countdown.textContent = 'Redirecting in ' + secondsLeft + '...';
 
+            // Mark role as revealed — prevents re-showing on back-navigation
+            localStorage.setItem('role_revealed', '1');
+
             if (revealTimer) clearInterval(revealTimer);
             revealTimer = setInterval(function() {
                 secondsLeft -= 1;
@@ -347,7 +364,7 @@
                     countdown.textContent = 'Redirecting in ' + secondsLeft + '...';
                 }
             }, 1000);
-            
+
             // Push state for back button protection
             history.pushState(null, null, window.location.href);
         }
@@ -442,62 +459,94 @@
             }, 200);
         }
 
-        // Back button protection
-        window.addEventListener('popstate', function(event) {
-            var existingRole = sessionStorage.getItem('participant_role') || localStorage.getItem('participant_role');
-            if (existingRole && document.body.classList.contains('role-reveal-active')) {
+        // ── Back button protection ────────────────────────────────────────────
+        // If role was already revealed + participant is logged in → any back-nav
+        // immediately bounces them forward to the event page instead of replaying
+        // the role reveal or leaving them stranded on the homepage.
+        window.addEventListener('popstate', function() {
+            if (localStorage.getItem('role_revealed') && localStorage.getItem('participant_id')) {
+                window.location.replace('main_event_page.html');
+            } else if (document.body.classList.contains('role-reveal-active')) {
                 history.pushState(null, null, window.location.href);
             }
         });
 
-        // ── Participant session pill ──────────────────────────────────────────
-        // Keys cleared on logout (all participant state)
+        // ── Participant session pill + resume banner ──────────────────────────
+        // All keys cleared on logout
         var PARTICIPANT_LS_KEYS = [
             'participant_id', 'participant_name', 'participant_role',
             'imposterTeamCode', 'imposterTeamName', 'imposterParticipant',
             'fizzbuzz_participant_cache', 'fizzbuzz_group',
-            'main_event_assignment_cache'
+            'main_event_assignment_cache',
+            'role_revealed'
         ];
 
         function initParticipantPill() {
-            var pill = document.getElementById('participant-pill');
-            var nameEl = document.getElementById('participant-pill-name');
-            var startBtn = document.getElementById('start-btn');
+            var pill         = document.getElementById('participant-pill');
+            var nameEl       = document.getElementById('participant-pill-name');
+            var startBtn     = document.getElementById('start-btn');
+            var contBtn      = document.getElementById('continue-event-btn');
+            var bannerSlot   = document.getElementById('resume-banner-slot');
             if (!pill || !nameEl) return;
 
-            // Attempt to read a saved participant from localStorage
+            // Resolve participant name from storage (multiple fallbacks)
             var savedName = localStorage.getItem('participant_name');
             if (!savedName) {
-                // Try to pull name from the full participant object
                 try {
                     var raw = localStorage.getItem('imposterParticipant');
-                    if (raw) {
-                        var p = JSON.parse(raw);
-                        savedName = p.name || p.participant_name || null;
-                    }
+                    if (raw) { var p = JSON.parse(raw); savedName = p.name || p.participant_name || null; }
                 } catch(e) {}
             }
 
-            if (savedName) {
-                nameEl.textContent = savedName;
-                pill.style.display = 'flex';
-                // Hide the START button — participant already joined
+            var alreadyRevealed = localStorage.getItem('role_revealed') === '1';
+            var hasSession      = !!(savedName && localStorage.getItem('participant_id'));
+
+            if (hasSession) {
+                // Show pill with name
+                nameEl.textContent   = savedName;
+                pill.style.display   = 'flex';
+                // Always hide the raw START button when a session exists
                 if (startBtn) startBtn.style.display = 'none';
+
+                if (alreadyRevealed) {
+                    // ── RESUME STATE: participant navigated back accidentally ──
+                    // Show green CONTINUE button in header
+                    if (contBtn) contBtn.style.display = 'inline-block';
+
+                    // Inject a prominent resume banner under the hero text
+                    if (bannerSlot) {
+                        bannerSlot.innerHTML =
+                            '<div class="resume-banner">' +
+                            '  <div class="resume-banner-title">⚡ SESSION ACTIVE</div>' +
+                            '  <div class="resume-banner-sub">Welcome back, <strong style="color:#fff">' + escName(savedName) + '</strong>.<br>' +
+                            '  Your event is still running — click below to return.</div>' +
+                            '  <button class="resume-banner-btn" onclick="window.location.href=\'main_event_page.html\'">▶ CONTINUE EVENT</button>' +
+                            '</div>';
+                    }
+
+                    // Also immediately bounce via popstate if they somehow get here via back
+                    history.pushState(null, null, window.location.href);
+                }
+                // If session exists but role not yet revealed: pill shows + START hidden
+                // — participant can still use the auth modal to see their role reveal
+                // (e.g. they logged in but closed the tab before the reveal fired)
             }
+        }
+
+        function escName(s) {
+            return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         }
 
         function participantLogout() {
             if (!confirm('Log out of this participant session?\n\nYou will need to re-enter your team code and name to rejoin.')) return;
-            // Clear all participant state
             PARTICIPANT_LS_KEYS.forEach(function(k) {
                 localStorage.removeItem(k);
                 sessionStorage.removeItem(k);
             });
-            // Reload so the page reflects the cleared state cleanly
             window.location.reload();
         }
 
-        // Run on page load
+        // Run on page load — must be LAST so all DOM is ready
         initParticipantPill();
     </script>
 </body>
