@@ -1667,101 +1667,72 @@ app.post('/api/admin/fizzbuzz/run-code', requireAdmin, async (req, res) => {
     const code        = fzSub.fizz_output;
     const submittedBy = fzSub.submitted_by;
 
-    // 1) Vercel Check
-    if (process.env.VERCEL) {
-       return res.json({
-           success: false,
-           error: "Execution on Vercel is disabled. Please run locally.",
-           message: "Execution on Vercel is disabled. Please run locally."
-       });
+    const GROQ_KEY = process.env.GROQ_API_KEY;
+
+    if (!GROQ_KEY) {
+        console.error('[run-code] Groq API configuration missing.');
+        return res.json({ success: false, message: "Groq API configuration missing." });
     }
 
-    // 2) Local child_process Execution
-    const { exec } = require('child_process');
-    const fs = require('fs');
-    const path = require('path');
-    const os = require('os');
-    const crypto = require('crypto');
+    console.log(`[run-code] API key exists. Language: ${language}, Code length: ${code.length}`);
 
-    const tmpDir = os.tmpdir();
-    const runId = crypto.randomBytes(8).toString('hex');
-    let cmd = '';
-    let workDir = tmpDir;
+    const prompt = `Language name: ${language}
+Source code:
+${code}
+Execute mentally. Produce exactly the console output. If compilation/runtime error exists, return only the error message. No explanations. No markdown. No code fences.`;
 
+    let groqResponse;
     try {
-        workDir = fs.mkdtempSync(path.join(tmpDir, `run_${runId}_`));
-    } catch (e) {
-        return res.status(500).json({ success: false, message: 'Failed to create temp directory' });
-    }
-
-    if (language === 'python' || language === 'python3') {
-        const filePath = path.join(workDir, `script.py`);
-        fs.writeFileSync(filePath, code);
-        cmd = `python "${filePath}"`;
-    } else if (language === 'javascript' || language === 'js' || language === 'node') {
-        const filePath = path.join(workDir, `script.js`);
-        fs.writeFileSync(filePath, code);
-        cmd = `node "${filePath}"`;
-    } else if (language === 'c') {
-        const filePath = path.join(workDir, `main.c`);
-        const exeName = process.platform === 'win32' ? 'main.exe' : 'main';
-        const executablePath = path.join(workDir, exeName);
-        fs.writeFileSync(filePath, code);
-        cmd = `gcc "${filePath}" -o "${executablePath}" && "${executablePath}"`;
-    } else if (language === 'cpp' || language === 'c++') {
-        const filePath = path.join(workDir, `main.cpp`);
-        const exeName = process.platform === 'win32' ? 'main.exe' : 'main';
-        const executablePath = path.join(workDir, exeName);
-        fs.writeFileSync(filePath, code);
-        cmd = `g++ "${filePath}" -o "${executablePath}" && "${executablePath}"`;
-    } else if (language === 'java') {
-        const filePath = path.join(workDir, `Main.java`);
-        fs.writeFileSync(filePath, code);
-        cmd = `cd "${workDir}" && javac Main.java && java Main`;
-    } else {
-        return res.status(400).json({ success: false, message: 'Unsupported language: ' + language });
-    }
-
-    exec(cmd, { timeout: 8000 }, (error, stdout, stderr) => {
-        // Cleanup
-        try {
-            fs.rmSync(workDir, { recursive: true, force: true });
-        } catch (e) {
-            console.error("Cleanup error:", e);
-        }
-
-        if (error && error.killed) {
-            return res.json({
-                success: false,
-                error: "Execution timed out after 8 seconds.",
-                message: "Execution timed out after 8 seconds."
-            });
-        }
-
-        const outStr = stdout ? String(stdout) : '';
-        const errStr = stderr ? String(stderr) : '';
-        const compilerMsg = error && error.code !== 0 ? error.message : '';
-        
-        let finalOutput = outStr;
-        if (errStr || compilerMsg) {
-            finalOutput += (finalOutput ? '\n--- error ---\n' : '');
-            if (errStr) finalOutput += errStr;
-            if (compilerMsg && !errStr.includes(compilerMsg)) finalOutput += '\n' + compilerMsg;
-        }
-
-        return res.json({
-            success: true,
-            shuffled_group,
-            language,
-            submitted_by: submittedBy,
-            stdout: outStr,
-            stderr: errStr,
-            compile_output: '',
-            message: compilerMsg,
-            output: finalOutput || '(no output)',
-            exit_code: error ? error.code : 0,
-            status: error ? 'Error' : 'Accepted'
+        groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${GROQ_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.1
+            }),
+            signal: AbortSignal.timeout(15000)
         });
+    } catch (e) {
+        console.error('[run-code] Fetch error:', e.message);
+        return res.json({ success: false, message: `Groq fetch failed: ${e.message}` });
+    }
+
+    console.log(`[run-code] Groq response status: ${groqResponse.status}`);
+
+    if (!groqResponse.ok) {
+        const errText = await groqResponse.text().catch(() => 'No text returned');
+        console.error(`[run-code] Groq API Error: ${groqResponse.status} - ${errText}`);
+        return res.json({ success: false, message: `Groq API Error: ${groqResponse.status} - ${errText}` });
+    }
+
+    let groqData;
+    let output = '';
+    try {
+        groqData = await groqResponse.json();
+        output = (groqData.choices?.[0]?.message?.content || '').trim();
+    } catch (e) {
+        console.error('[run-code] Malformed response from Groq:', e.message);
+        return res.json({ success: false, message: "Malformed response from Groq." });
+    }
+
+    const isError = /error|exception|traceback|segmentation fault|syntaxerror|typeerror|referenceerror/i.test(output);
+
+    return res.json({
+        success: true,
+        shuffled_group,
+        language,
+        submitted_by: submittedBy,
+        stdout: isError ? '' : output,
+        stderr: isError ? output : '',
+        compile_output: '',
+        message: '',
+        output: output || '(no output)',
+        status: isError ? 'Compilation Error' : 'Accepted',
+        exit_code: isError ? 1 : 0
     });
   } catch (err) {
     console.error('[run-code]', err.message);
