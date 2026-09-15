@@ -96,7 +96,15 @@
         /* Subtle failed state */
         .celeb-card.sub-failed { border-color:rgba(220,20,60,0.4); box-shadow:0 0 30px rgba(220,20,60,0.1); }
         .celeb-card.sub-failed::before { background:radial-gradient(ellipse at 50% 0%,rgba(220,20,60,0.06) 0%,transparent 70%); }
-        
+        /* ── Evaluation status badges ── */
+        .eval-badge { display:inline-flex; align-items:center; gap:7px; border-radius:50px; padding:5px 16px; font-size:0.68rem; font-weight:900; letter-spacing:2px; text-transform:uppercase; margin-bottom:16px; font-family:'Courier New',monospace; }
+        .eval-badge-preliminary { background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.5); color:#f59e0b; }
+        .eval-badge-preliminary-dot { width:7px; height:7px; border-radius:50%; background:#f59e0b; flex-shrink:0; animation:prelimPulse 1.4s ease-in-out infinite; box-shadow:0 0 6px #f59e0b; }
+        @keyframes prelimPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.3;transform:scale(0.7)} }
+        .eval-badge-final { background:rgba(0,255,128,0.08); border:1px solid rgba(0,255,128,0.45); color:var(--green); }
+        .prelim-notice { background:rgba(245,158,11,0.05); border:1px solid rgba(245,158,11,0.25); border-left:3px solid #f59e0b; border-radius:4px; padding:13px 16px; margin-top:14px; font-size:0.81rem; color:#c9921a; line-height:1.65; text-align:left; }
+        .prelim-notice strong { color:#f5b942; }
+
     </style>
 </head>
 <body>
@@ -154,6 +162,8 @@
                 <div class="celeb-check">
                     <svg viewBox="0 0 40 40"><polyline points="8,21 17,30 32,12"/></svg>
                 </div>
+                <!-- Status badge — injected/replaced by JS -->
+                <div id="celeb-eval-badge"></div>
                 <div class="celeb-title" id="celeb-title">Submission Complete!</div>
                 <div class="celeb-sub" id="celeb-sub">Your repository has been received.<br>Sit back and relax — the coordinators will take it from here. 🚀</div>
                 <div class="celeb-badge"><span class="celeb-badge-dot"></span><span id="celeb-badge-txt">Locked In</span></div>
@@ -200,7 +210,10 @@
                 if (c.github_repo && (c.submission_status === 'Submitted' || c.submission_status === 'Evaluated' || c.evaluation_status === 'Evaluated')) {
                     lockForm(c.github_repo, c.submitted_at, c.github_owner, c.github_repo_name);
                     if (c.submission_status === 'Evaluated' || c.evaluation_status === 'Evaluated') {
-                        showEvalResults();
+                        // pairwise_evaluated is not in the localStorage cache (intentional —
+                        // it changes and the live fetch will correct it). Show preliminary
+                        // state first; the live loadAssignment() call will upgrade if needed.
+                        showEvalResults(c);
                     } else {
                         startPolling();
                     }
@@ -357,12 +370,15 @@
             }
         }
 
-        function showCelebration(msg, sub) {
+        function showCelebration(msg, sub, badgeHtml) {
             document.getElementById('eval-section').style.display = 'block';
             document.getElementById('celeb-card').className = 'celeb-card';
             document.getElementById('celeb-title').innerText = msg || 'Submission Complete!';
             document.getElementById('celeb-sub').innerHTML = sub ||
                 'Your repository has been received.<br>Sit back and relax — the coordinators will take it from here. 🚀';
+            // Status badge slot
+            var badgeEl = document.getElementById('celeb-eval-badge');
+            if (badgeEl) badgeEl.innerHTML = badgeHtml || '';
             document.getElementById('celeb-badge-txt').innerText = 'Locked In';
             // Spawn confetti only once
             var wrap = document.getElementById('confetti-wrap');
@@ -370,10 +386,68 @@
         }
 
         function showEvalPending() { showCelebration(); }  // keep old callers working
-        function showEvalFailed()  { showCelebration('Submission Received!',
-            'Your repository is safely saved. The coordinators will verify your work. 👍'); }
-        function showEvalResults() { showCelebration('You\'re All Done!',
-            'Your work is in. Results will be announced by the coordinator. Good luck! 🎉'); }
+
+        function showEvalFailed() {
+            showCelebration(
+                'Submission Received!',
+                'Your repository is safely saved. The coordinators will verify your work. 👍'
+            );
+        }
+
+        // ── Pairwise completion poll ──────────────────────────────────────────
+        // Once individual eval is done (preliminary state), poll every 8s until
+        // the pairwise result lands, then upgrade the card in-place to Final state.
+        var _pairwisePollInterval = null;
+
+        function startPairwisePoll() {
+            if (_pairwisePollInterval) return; // already running
+            _pairwisePollInterval = setInterval(async function() {
+                try {
+                    var r = await fetch(API_BASE + '/api/my-assignment/' + PARTICIPANT_ID);
+                    var d = await r.json();
+                    if (d.success && d.assignment && d.assignment.pairwise_evaluated === true) {
+                        showEvalResults(d.assignment); // upgrades to Final state + stops poll
+                    }
+                } catch(e) { /* silent — keep showing preliminary */ }
+            }, 8000);
+        }
+
+        function stopPairwisePoll() {
+            if (_pairwisePollInterval) { clearInterval(_pairwisePollInterval); _pairwisePollInterval = null; }
+        }
+
+        // showEvalResults(a) — shows Preliminary or Final depending on pairwise status.
+        // a can be null/undefined (shows pending/preliminary as safe default).
+        function showEvalResults(a) {
+            var pairwiseDone = (a && a.pairwise_evaluated === true);
+
+            if (pairwiseDone) {
+                // ── FINAL — pairwise evaluation complete ─────────────────────
+                stopPairwisePoll();
+                showCelebration(
+                    'EVALUATION COMPLETE',
+                    'Your final score has been determined after head-to-head evaluation against your assigned competitor. Results will be announced by the coordinator. Good luck! 🎉',
+                    '<div class="eval-badge eval-badge-final">✓&nbsp;&nbsp;FINAL SCORE LOCKED IN</div>'
+                );
+            } else {
+                // ── PRELIMINARY — individual eval done, pairwise still pending ─
+                showCelebration(
+                    'INDIVIDUAL ANALYSIS DONE',
+                    'Your submission has been individually reviewed.' +
+                    '<div class="prelim-notice">' +
+                        '<strong>⚠ NOT YOUR FINAL SCORE</strong><br>' +
+                        'This is a <strong>preliminary result</strong> based on your code alone. ' +
+                        'Your final score will be set after <strong>pairwise evaluation</strong> ' +
+                        'against your assigned competitor — this result may change.' +
+                    '</div>',
+                    '<div class="eval-badge eval-badge-preliminary">' +
+                        '<span class="eval-badge-preliminary-dot"></span>' +
+                        'NOT FINAL — AWAITING PAIRWISE' +
+                    '</div>'
+                );
+                startPairwisePoll(); // auto-upgrades when pairwise lands
+            }
+        }
 
         function lockForm(repo, ts, owner, repoName) {
             document.getElementById('submissionForm').style.display = 'none';

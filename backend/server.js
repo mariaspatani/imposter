@@ -318,6 +318,23 @@ app.get('/api/my-assignment/:participantId', async (req, res) => {
       }
     }
 
+    // Expose whether pairwise (competitive) evaluation is complete for this participant.
+    // This is a boolean flag only — no scores are leaked.  Used by the participant UI to
+    // distinguish "preliminary individual score" from "final pairwise score".
+    data.pairwise_evaluated = false;
+    if (data.evaluation_status === 'Evaluated') {
+      try {
+        const { data: pairRow } = await supabase
+          .from('competitive_evaluation_pairs')
+          .select('status')
+          .or(`participant_a_id.eq.${participantId},participant_b_id.eq.${participantId}`)
+          .eq('status', 'EVALUATED')
+          .limit(1)
+          .maybeSingle();
+        data.pairwise_evaluated = !!(pairRow && pairRow.status === 'EVALUATED');
+      } catch (_) { /* non-fatal — defaults to false (shows preliminary badge) */ }
+    }
+
     return res.json({ success: true, assignment: data });
   } catch (err) {
     console.error('[my-assignment]', err.message);
