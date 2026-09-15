@@ -1320,7 +1320,7 @@ app.get('/api/admin/team-scores', requireAdmin, async (req, res) => {
 
 // ── GET /api/admin/podium ─────────────────────────────────────────────────────
 
-app.get('/api/admin/podium', requireAdmin, async (req, res) => {
+const getPodiumData = async (req, res) => {
   try {
     const [assignRes, manualRes] = await Promise.all([
       supabase.from('main_event_assignments').select('original_team, main_event_score, fizzbuzz_score, ai_score'),
@@ -1347,7 +1347,10 @@ app.get('/api/admin/podium', requireAdmin, async (req, res) => {
     })).sort((a, b) => b.grand_total - a.grand_total);
     return res.json({ success: true, podium });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
-});
+};
+
+app.get('/api/admin/podium', requireAdmin, getPodiumData);
+app.get('/api/podium', getPodiumData);
 
 // ── POST /api/admin/unlock-submission ─────────────────────────────────────────
 
