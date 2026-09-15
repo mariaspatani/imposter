@@ -28,11 +28,12 @@
         <button onclick="switchTab('flow')"         id="nav-flow"         class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">👁️ Event Flow</button>
         <button onclick="switchTab('pairwise')"     id="nav-pairwise"     class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">⚔️ Pairwise (12 Pairs)</button>
     </nav>
-    <div class="p-4 border-t border-bordergray bg-black/50 text-xs font-orbitron">
+    <div class="p-4 border-t border-bordergray bg-black/50 text-xs font-orbitron space-y-2">
         <div class="flex items-center justify-between text-gray-400 mb-1">
             <span>Live Status</span><span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
         </div>
         <div id="sidebar-status" class="text-crimson-500 font-bold truncate">Loading...</div>
+        <button onclick="confirmLogout()" class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-rose-900/30 text-rose-400 border border-rose-700/40 hover:bg-rose-700 hover:text-white transition-all text-[11px] font-orbitron tracking-wider">🚪 Logout</button>
     </div>
 </aside>
 
@@ -352,6 +353,22 @@
   </div>
 </div>
 
+<!-- ── Logout Confirmation Modal ── -->
+<div id="logout-modal" class="fixed inset-0 bg-black/90 backdrop-blur-sm z-[998] hidden items-center justify-center p-4" style="display:none;">
+    <div class="bg-cardgray border border-rose-700/40 rounded-2xl max-w-sm w-full p-8 shadow-2xl space-y-5">
+        <div class="text-center space-y-2">
+            <div class="text-3xl">⚠️</div>
+            <h2 class="text-base font-orbitron font-bold text-rose-400 uppercase tracking-widest">Confirm Logout</h2>
+            <p class="text-xs font-rajdhani text-gray-300 leading-relaxed">You are about to log out of the admin dashboard.<br>All unsaved actions will be lost and you will need to re-enter your password.</p>
+            <p class="text-[11px] font-orbitron text-amber-400 mt-1">⚡ During the event — only logout if absolutely necessary.</p>
+        </div>
+        <div class="flex gap-3">
+            <button onclick="cancelLogout()" class="flex-1 text-sm font-orbitron px-4 py-3 rounded-xl bg-bordergray text-gray-300 hover:bg-zinc-700 transition-all">Cancel</button>
+            <button onclick="doLogout()"     class="flex-1 text-sm font-orbitron px-4 py-3 rounded-xl bg-rose-700 text-white hover:bg-rose-600 transition-all">Yes, Logout</button>
+        </div>
+    </div>
+</div>
+
 <!-- ── Admin Login Modal ── -->
 <div id="login-modal" class="fixed inset-0 bg-black/90 backdrop-blur-sm z-[999] flex items-center justify-center p-4">
     <div class="bg-cardgray border border-bordergray rounded-2xl max-w-sm w-full p-8 shadow-2xl space-y-5">
@@ -373,7 +390,9 @@ const API = (window.location.hostname === 'localhost' || window.location.hostnam
     : '';  // same-origin on Vercel (vercel.json rewrites /api/* to backend)
 
 // ── Admin auth token ────────────────────────────────────────────────────────────
-let ADMIN_TOKEN = sessionStorage.getItem('admin_token') || '';
+// Stored in localStorage so it survives page reload and back-navigation.
+// sessionStorage would be wiped on reload — localStorage persists until explicit logout.
+let ADMIN_TOKEN = localStorage.getItem('admin_token') || '';
 
 function authHeaders(extra = {}) {
     return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ADMIN_TOKEN, ...extra };
@@ -383,9 +402,9 @@ function authHeaders(extra = {}) {
 async function apiFetch(url, opts = {}) {
     const res = await fetch(url, opts);
     if (res.status === 401) {
-        // Session expired — clear token and show login modal
+        // Server says token is invalid/expired — clear and show login
         ADMIN_TOKEN = '';
-        sessionStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_token');
         document.getElementById('login-modal').style.display = 'flex';
         throw new Error('Session expired. Please log in again.');
     }
@@ -405,7 +424,7 @@ async function doLogin() {
         const d = await r.json();
         if (r.ok && d.success) {
             ADMIN_TOKEN = d.token;
-            sessionStorage.setItem('admin_token', ADMIN_TOKEN);
+            localStorage.setItem('admin_token', ADMIN_TOKEN);
             document.getElementById('login-modal').style.display = 'none';
             init();
         } else {
@@ -416,6 +435,29 @@ async function doLogin() {
         errEl.textContent = 'Cannot reach server.';
         errEl.classList.remove('hidden');
     }
+}
+
+// ── Logout ────────────────────────────────────────────────────────────────────
+function confirmLogout() {
+    const m = document.getElementById('logout-modal');
+    m.style.display = 'flex';
+    m.classList.remove('hidden');
+}
+function cancelLogout() {
+    const m = document.getElementById('logout-modal');
+    m.style.display = 'none';
+}
+async function doLogout() {
+    // Best-effort server-side token invalidation — ignore errors
+    try {
+        await fetch(API + '/api/admin/logout', { method: 'POST', headers: authHeaders() });
+    } catch (_) {}
+    ADMIN_TOKEN = '';
+    localStorage.removeItem('admin_token');
+    document.getElementById('logout-modal').style.display = 'none';
+    document.getElementById('login-modal').style.display  = 'flex';
+    document.getElementById('login-secret').value = '';
+    document.getElementById('login-error').classList.add('hidden');
 }
 
 // Show login modal if no token stored; otherwise init immediately

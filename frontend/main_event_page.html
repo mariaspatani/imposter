@@ -162,14 +162,36 @@
 
         var PARTICIPANT_ID = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
         if (!PARTICIPANT_ID) {
-            var _s = sessionStorage.getItem('imposterParticipant');
-            var _p = _s ? JSON.parse(_s) : null;
+            var _s = sessionStorage.getItem('imposterParticipant') || localStorage.getItem('imposterParticipant');
+            var _p = _s ? (function(){try{return JSON.parse(_s);}catch(e){return null;}})() : null;
             PARTICIPANT_ID = _p && _p.id ? String(_p.id) : null;
         }
         if (!PARTICIPANT_ID) { window.location.href = 'homepage.html'; }
 
         // Assignment cache (populated on load for potential future use)
         var _assignmentData = null;
+
+        // ── Restore cached assignment so reload shows data instantly ─────────
+        (function restoreCachedAssignment(){
+            var cached = localStorage.getItem('main_event_assignment_cache');
+            if (!cached) return;
+            try {
+                var c = JSON.parse(cached);
+                if (c.participant_id !== PARTICIPANT_ID) return; // stale cache
+                _assignmentData = c;
+                renderAssignment(c);
+                document.getElementById('submission-section').style.display = 'block';
+                // Restore already-submitted state so participant doesn't see blank form on reload
+                if (c.github_repo && (c.submission_status === 'Submitted' || c.submission_status === 'Evaluated' || c.evaluation_status === 'Evaluated')) {
+                    lockForm(c.github_repo, c.submitted_at, c.github_owner, c.github_repo_name);
+                    if (c.submission_status === 'Evaluated' || c.evaluation_status === 'Evaluated') {
+                        showEvalResults();
+                    } else {
+                        startPolling();
+                    }
+                }
+            } catch(e) {}
+        })();
 
         // ── Server-synced countdown timer ─────────────────────────────────────
         // Polls /api/timer/main_event every 5s; local tick interpolates in between.
@@ -358,12 +380,37 @@
                 var res  = await fetch(API_BASE + '/api/my-assignment/'+PARTICIPANT_ID);
                 var data = await res.json();
                 if (!res.ok || !data.success) {
-                    document.getElementById('assignment-section').innerHTML = '<div class="state-card error">'+esc(data&&data.message?data.message:'Assignment not found.')+'</div>';
+                    // Only show error if we have no cached data to display
+                    if (!_assignmentData) {
+                        document.getElementById('assignment-section').innerHTML = '<div class="state-card error">'+esc(data&&data.message?data.message:'Assignment not found.')+'</div>';
+                    }
                     return;
                 }
                 var a = data.assignment;
                 // Cache so initGate can use without a second fetch
                 _assignmentData = a;
+                // Persist to localStorage so reload works without waiting for the fetch
+                try {
+                    localStorage.setItem('main_event_assignment_cache', JSON.stringify({
+                        participant_id:   PARTICIPANT_ID,
+                        participant_name: a.participant_name,
+                        original_team:    a.original_team,
+                        shuffled_group:   a.shuffled_group,
+                        task_number:      a.task_number,
+                        task_title:       a.task_title,
+                        task_description: a.task_description,
+                        role_name:        a.role_name,
+                        work_description: a.work_description,
+                        is_imposter:      a.is_imposter,
+                        secret_objective: a.secret_objective || null,
+                        github_repo:      a.github_repo || null,
+                        github_owner:     a.github_owner || null,
+                        github_repo_name: a.github_repo_name || null,
+                        submitted_at:     a.submitted_at || null,
+                        submission_status: a.submission_status || 'Pending',
+                        evaluation_status: a.evaluation_status || 'Pending'
+                    }));
+                } catch(e) {}
                 renderAssignment(a);
                 document.getElementById('submission-section').style.display = 'block';
 
@@ -423,7 +470,18 @@
                 if (res.ok && data && data.success) {
                     var repoMeta = data.repository || {};
                     btn.textContent = 'Submitted Successfully';
-                    lockForm(url, new Date().toISOString(), repoMeta.owner, repoMeta.name);
+                    var submittedAt = new Date().toISOString();
+                    lockForm(url, submittedAt, repoMeta.owner, repoMeta.name);
+                    // Update cache with submitted state so reload shows locked form
+                    try {
+                        var prev = JSON.parse(localStorage.getItem('main_event_assignment_cache') || '{}');
+                        prev.github_repo      = url;
+                        prev.github_owner     = repoMeta.owner || null;
+                        prev.github_repo_name = repoMeta.name  || null;
+                        prev.submitted_at     = submittedAt;
+                        prev.submission_status = 'Submitted';
+                        localStorage.setItem('main_event_assignment_cache', JSON.stringify(prev));
+                    } catch(e) {}
                     startPolling();
                     return;
                 }

@@ -112,8 +112,8 @@
 
         var PARTICIPANT_ID = localStorage.getItem('participant_id') || sessionStorage.getItem('participant_id');
         if (!PARTICIPANT_ID) {
-            var _s = sessionStorage.getItem('imposterParticipant');
-            var _p = _s ? JSON.parse(_s) : null;
+            var _s = sessionStorage.getItem('imposterParticipant') || localStorage.getItem('imposterParticipant');
+            var _p = _s ? (function(){try{return JSON.parse(_s);}catch(e){return null;}})() : null;
             PARTICIPANT_ID = _p && _p.id ? String(_p.id) : null;
         }
         if (!PARTICIPANT_ID) { window.location.href = 'homepage.html'; }
@@ -122,6 +122,35 @@
         var ORIGINAL_TEAM    = localStorage.getItem('imposterTeamName') || '';
         var statusPoll       = null;   // polls /api/fizzbuzz/toggle for close
         var lockPollInterval = null;   // polls for group submission by another member
+
+        // ── Restore cached participant info so reload shows names instantly ──
+        (function restoreCachedInfo(){
+            var cached = localStorage.getItem('fizzbuzz_participant_cache');
+            if (!cached) return;
+            try {
+                var c = JSON.parse(cached);
+                if (c.id !== PARTICIPANT_ID) return; // stale cache for different user
+                var nameEl  = document.getElementById('info-name');
+                var teamEl  = document.getElementById('info-team');
+                var groupEl = document.getElementById('info-group');
+                if (nameEl  && c.name)  nameEl.innerText  = c.name;
+                if (teamEl  && c.team)  teamEl.innerText  = c.team;
+                if (groupEl && c.group) groupEl.innerText = c.group;
+                // Show cards while data loads in background
+                document.getElementById('info-card').style.display  = 'block';
+                document.getElementById('form-panel').style.display = 'block';
+                // Restore submitted state if was already submitted
+                if (c.submitted && c.submittedBy) {
+                    var locked = document.getElementById('locked-notice');
+                    locked.innerHTML = '🔒 <strong>SUBMITTED</strong>'
+                        + '<br>Submitted by: ' + escHtml(c.submittedBy)
+                        + (c.submittedAt ? '<br>Time: ' + new Date(c.submittedAt).toLocaleTimeString() : '')
+                        + '<br><span style="font-size:0.8rem;color:#9db5d3;">Waiting for coordinator scoring.</span>';
+                    locked.style.display = 'block';
+                    document.getElementById('fizzbuzz-form').style.display = 'none';
+                }
+            } catch(e) {}
+        })();
 
         // ── Space background ──────────────────────────────────────────────────
         var cv=document.getElementById('space-bg'),cx=cv.getContext('2d');
@@ -255,6 +284,17 @@
                     return;
                 }
 
+                // Save to localStorage cache for reload resilience
+                localStorage.setItem('fizzbuzz_participant_cache', JSON.stringify({
+                    id:    PARTICIPANT_ID,
+                    name:  document.getElementById('info-name').innerText || '',
+                    team:  document.getElementById('info-team').innerText || '',
+                    group: resolvedGroup || '',
+                    submitted: !!(ad.success && (ad.group_submitted || ad.fizzbuzz_locked)),
+                    submittedBy: (ad.success && ad.group_submission && ad.group_submission.submitted_by) || '',
+                    submittedAt: (ad.success && ad.group_submission && ad.group_submission.submitted_at) || ''
+                }));
+
                 // Start group lock poll so this participant sees when another group member submits
                 if(startLock) startLockPoll();
 
@@ -318,6 +358,14 @@
                         + '<strong>Group:</strong> ' + escHtml(data.shuffled_group||'--') + '<br>'
                         + '<strong>Submitted by:</strong> ' + escHtml(data.submitted_by||'--') + '<br>'
                         + '<strong>Language:</strong> ' + escHtml(lang);
+                    // Persist submitted state so reload shows it correctly
+                    try {
+                        var prev = JSON.parse(localStorage.getItem('fizzbuzz_participant_cache') || '{}');
+                        prev.submitted   = true;
+                        prev.submittedBy = data.submitted_by || '';
+                        prev.submittedAt = new Date().toISOString();
+                        localStorage.setItem('fizzbuzz_participant_cache', JSON.stringify(prev));
+                    } catch(e) {}
                     return;
                 }
                 msg.style.display = 'block'; msg.className = 'status-msg error';
