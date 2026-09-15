@@ -109,7 +109,11 @@ async function syncPairsWithDatabase(supabase, assignments) {
         .upsert(row, { onConflict: 'task_number,person_slot' })
         .select('*')
         .maybeSingle();
+      // Merge existing evaluation_result if the upsert cleared it
       const finalObj = upserted || { ...existing, ...row };
+      if (!finalObj.evaluation_result && existing?.evaluation_result) {
+        finalObj.evaluation_result = existing.evaluation_result;
+      }
       finalObj.participant_a = pair.participant_a;
       finalObj.participant_b = pair.participant_b;
       syncedPairs.push(finalObj);
