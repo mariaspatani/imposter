@@ -23,11 +23,11 @@ async function loadCriteria(supabase, gameId = 'main_event') {
       .from('evaluation_criteria')
       .select('*')
       .eq('game_id', gameId)
-      .neq('criterion_key', 'logic')
       .order('sort_order');
     if (!error && data && data.length) {
-      const sum = data.reduce((s, c) => s + Number(c.max_score), 0);
-      if (sum === 100) return data;
+      // Filter out the retired 'logic' criterion (replaced by responsiveness + creativity)
+      const active = data.filter(c => c.criterion_key !== 'logic');
+      if (active.length > 0) return active;
     }
   } catch (_) {}
   return DEFAULT_MAIN_EVENT_CRITERIA;

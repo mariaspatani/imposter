@@ -115,6 +115,15 @@ Evaluate BOTH the cover job AND whether the secret sabotage objective is impleme
 The imposter should NOT automatically score higher because of sabotage — sabotage is part of their assigned requirements. Evaluate it with the same objective standards as specialist work.`;
     }
 
+    // Build score instructions and JSON shape dynamically from the actual criteria list
+    // so the prompt always matches what validateCriteriaScores expects.
+    const scoreInstructions = criteria
+      .map(c => `  * ${c.criterion_key}_score: 0 to ${c.max_score}`)
+      .join('\n');
+    const jsonScoreShape = criteria
+      .map(c => `  "${c.criterion_key}_score": <integer 0-${c.max_score}>`)
+      .join(',\n');
+
     const userPromptPrefix = `ASSIGNED TASK
 Task Number: ${assignment.task_number || '1'}
 Task Title: ${assignment.task_title || ''}
@@ -129,21 +138,14 @@ ${runtimeSection}
 
 EVALUATION INSTRUCTIONS:
 - Score each criterion strictly between 0 and its max marks:
-  * task_completion_score: 0 to 40
-  * ui_score: 0 to 20
-  * responsiveness_score: 0 to 20
-  * creativity_score: 0 to 20
+${scoreInstructions}
 - Provide 2-4 concrete strengths and weaknesses grounded in the source code or runtime evidence.
 - Categorize tests into passed_tests, failed_tests, and unverified_tests.
 - Provide a clear, factual 2-3 sentence feedback summary.
 
 REQUIRED JSON FORMAT:
 {
-  "task_completion_score": <integer 0-40>,
-  "ui_score": <integer 0-20>,
-  "responsiveness_score": <integer 0-20>,
-  "creativity_score": <integer 0-20>,
-  "total_score": <integer 0-100>,
+${jsonScoreShape},
   "strengths": ["<concrete strength 1>", "<concrete strength 2>"],
   "weaknesses": ["<concrete weakness 1>", "<concrete weakness 2>"],
   "passed_tests": ["<feature/test that passed>"],

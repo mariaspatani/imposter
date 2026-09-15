@@ -40,11 +40,13 @@ function validateCriteriaScores(parsed, criteria) {
       }
     }
     if (raw == null) {
-      if (c.criterion_key === 'logic') {
-        raw = 0; // logic split into responsiveness & creativity, default to 0 if omitted
-      } else {
-        throw new Error(`AI response missing criterion "${c.criterion_key}".`);
+      // Gracefully default to 0 rather than crashing the evaluation.
+      // 'logic' was removed from the rubric — always 0.
+      // Other criteria: if AI omits a key despite instructions, default 0 and log.
+      if (c.criterion_key !== 'logic') {
+        console.warn(`[criteria] AI response missing criterion "${c.criterion_key}" — defaulting to 0`);
       }
+      raw = 0;
     }
     scores[c.criterion_key] = clampScore(raw, 0, Number(c.max_score));
   }

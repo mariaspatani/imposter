@@ -158,12 +158,12 @@ function getKeyPool() {
   });
 
   if (allKeys.length === 0) {
-    // Return a dummy pool that throws a clear error at call time
-    console.warn('[GroqKeyPool] No Groq API keys found in environment.');
-    _instance = new GroqKeyPool(['__missing__']);
-    // Mark it as permanently cooled so next() always throws the "all cooled down" message
-    _instance._cooldownUntil.set('__missing__', Date.now() + 365 * 24 * 3600 * 1000);
-    return _instance;
+    // Throw immediately — no point creating a pool that can never work.
+    // Callers catch this and surface it as an evaluation failure.
+    throw new Error(
+      'No Groq API keys configured. ' +
+      'Set GROQ_API_KEY or GROQ_API_KEY_1…GROQ_API_KEY_10 in your .env file.'
+    );
   }
 
   console.log(`[GroqKeyPool] Initialised with ${allKeys.length} key(s) ` +
