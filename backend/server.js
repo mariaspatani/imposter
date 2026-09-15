@@ -18,6 +18,12 @@ const fizzbuzzLib = require('./lib/fizzbuzz');
 const scoringLib = require('./lib/scoring');
 const { processEvaluation, loadCriteria, publicEvaluationView, evaluationState } = require('./lib/evaluation/pipeline');
 const { DEFAULT_MAIN_EVENT_CRITERIA, maxTotal } = require('./lib/evaluation/criteria');
+const {
+  computeCodeSimilarity,
+  compareSameRolePair,
+  buildTaskCohortReport,
+  buildFullEventCohortReport
+} = require('./lib/evaluation/cohortComparator');
 
 // ── Startup validation ────────────────────────────────────────────────────────
 
@@ -1524,6 +1530,50 @@ app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, a
     }, { retry: true, force: true }).catch(err => console.error('[re-eval]', participantId, err.message));
 
     auditLog('re_evaluate', participantId, { participant: asgn.participant_name });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── GET /api/admin/cohort-report/:taskNumber? ─────────────────────────────────
+app.get('/api/admin/cohort-report/:taskNumber?', requireAdmin, async (req, res) => {
+  try {
+    const taskNumber = req.params.taskNumber ? parseInt(req.params.taskNumber, 10) : null;
+    const { data: assignments, error: asgnErr } = await supabase
+      .from('main_event_assignments')
+      .select('*')
+      .order('shuffled_group');
+    if (asgnErr) return res.status(500).json({ success: false, message: asgnErr.message });
+
+    const { data: evaluations } = await supabase
+      .from('evaluations')
+      .select('participant_id, criteria_scores, runtime_evidence, feedback')
+      .eq('game_id', 'main_event');
+
+    const evalMap = {};
+    (evaluations || []).forEach(e => { evalMap[e.participant_id] = e; });
+
+    const enriched = (assignments || []).map(a => {
+      const e = evalMap[a.participant_id] || {};
+      const cs = e.criteria_scores || {};
+      return {
+        ...a,
+        passed_tests: cs.passed_tests || [],
+        failed_tests: cs.failed_tests || [],
+        unverified_tests: cs.unverified_tests || [],
+        strengths: cs.strengths || [],
+        weaknesses: cs.weaknesses || [],
+        comparative_notes: cs.comparative_notes || [],
+      };
+    });
+
+    if (taskNumber && [1, 2, 3].includes(taskNumber)) {
+      const report = buildTaskCohortReport(taskNumber, enriched);
+      return res.json({ success: true, report });
+    }
+
+    const report = buildFullEventCohortReport(enriched);
+    return res.json({ success: true, report });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }

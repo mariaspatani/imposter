@@ -23,8 +23,12 @@ async function loadCriteria(supabase, gameId = 'main_event') {
       .from('evaluation_criteria')
       .select('*')
       .eq('game_id', gameId)
+      .neq('criterion_key', 'logic')
       .order('sort_order');
-    if (!error && data && data.length) return data;
+    if (!error && data && data.length) {
+      const sum = data.reduce((s, c) => s + Number(c.max_score), 0);
+      if (sum === 100) return data;
+    }
   } catch (_) {}
   return DEFAULT_MAIN_EVENT_CRITERIA;
 }
@@ -130,12 +134,28 @@ async function processEvaluation(supabase, participantId, options = {}) {
       };
     }
 
-    // Step 3: AI evaluation — pass the already-downloaded sourceCode so we don't re-download.
+    // Step 3: Fetch secret objective securely if participant is an imposter
+    let secretObjective = null;
+    if (asgn.is_imposter && asgn.task_number) {
+      try {
+        const { data: taskRow } = await supabase
+          .from('main_event_tasks')
+          .select('person4_secret')
+          .eq('task_number', asgn.task_number)
+          .maybeSingle();
+        if (taskRow && taskRow.person4_secret) {
+          secretObjective = taskRow.person4_secret;
+        }
+      } catch (_) {}
+    }
+
+    // Step 4: AI evaluation — pass the already-downloaded sourceCode and secret objective
     const result = await provider.evaluateSubmission({
       assignment: asgn,
       criteria,
       runtimeEvidence,
-      sourceCode
+      sourceCode,
+      secretObjective
     });
     const scorePatch = toAssignmentColumns(result, criteria);
     const fizz = Number(asgn.fizzbuzz_score || 0);
@@ -153,7 +173,15 @@ async function processEvaluation(supabase, participantId, options = {}) {
     await upsertEvaluationRow(supabase, participantId, {
       status: 'COMPLETED',
       completed_at: new Date().toISOString(),
-      criteria_scores: result.scores,
+      criteria_scores: {
+        ...result.scores,
+        strengths: result.strengths || [],
+        weaknesses: result.weaknesses || [],
+        passed_tests: result.passed_tests || [],
+        failed_tests: result.failed_tests || [],
+        unverified_tests: result.unverified_tests || [],
+        comparative_notes: result.comparative_notes || [],
+      },
       total_score: result.total,
       max_total: result.maxTotal,
       feedback: result.feedback,
@@ -188,6 +216,12 @@ async function processEvaluation(supabase, participantId, options = {}) {
       total: result.total,
       maxTotal: result.maxTotal,
       feedback: result.feedback,
+      strengths: result.strengths || [],
+      weaknesses: result.weaknesses || [],
+      passed_tests: result.passed_tests || [],
+      failed_tests: result.failed_tests || [],
+      unverified_tests: result.unverified_tests || [],
+      comparative_notes: result.comparative_notes || [],
     };
   } catch (err) {
     const message = (err && err.message) ? err.message : 'AI evaluation failed.';
@@ -222,7 +256,6 @@ function publicEvaluationView(asgn, criteria) {
     scores: {
       task_completion: asgn.task_match_score,
       ui: asgn.ui_score,
-      logic: asgn.logic_score,
       responsiveness: asgn.code_quality_score,
       creativity: asgn.creativity_score,
     },
