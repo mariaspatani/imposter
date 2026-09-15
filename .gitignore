@@ -71,3 +71,6 @@ test-results/
 # -- Old test files (moved to tests/, kept locally) --------------------------
 backend/_*_test.js
 backend/_evaluation_pipeline_test.js
+
+# -- Postman collections (local API testing, not for repo) ------------------
+*.postman_collection.json
