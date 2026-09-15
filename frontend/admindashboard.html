@@ -247,22 +247,109 @@
     </div>
 </main>
 
-<!-- ── Feedback Modal ── -->
-<div id="fb-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
-    <div class="bg-cardgray border border-bordergray rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
-        <div class="flex items-center justify-between">
-            <h3 class="text-sm font-orbitron font-bold text-crimson-500" id="fb-name">Feedback</h3>
-            <button onclick="closeFB()" class="text-gray-400 hover:text-white text-xl font-bold">&times;</button>
+<!-- ── AI Evaluation Detail Modal (lock-screen style) ── -->
+<div id="fb-modal" class="fixed inset-0 bg-black/90 backdrop-blur-sm hidden z-50 overflow-y-auto" style="scrollbar-color:#2d263d #06050a">
+  <div class="min-h-screen flex items-start justify-center p-4 py-8">
+    <div class="bg-charcoal border border-bordergray rounded-2xl w-full max-w-4xl shadow-2xl shadow-black/60 overflow-hidden">
+
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-bordergray bg-black/40">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-orbitron text-crimson-500 uppercase tracking-widest">🤖 AI Evaluation Report</span>
+            <span id="fb-imposter-badge" class="hidden px-2 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 font-orbitron">IMPOSTER</span>
+          </div>
+          <h3 class="text-base font-orbitron font-bold text-white mt-0.5" id="fb-name">—</h3>
+          <div class="text-xs font-mono text-gray-400 mt-0.5" id="fb-meta">—</div>
         </div>
-        <div class="grid grid-cols-3 gap-2 text-center" id="fb-scores"></div>
-        <div>
-            <div id="fb-feedback-label" class="text-[10px] font-orbitron text-gray-400 mb-1 uppercase tracking-widest">AI Feedback</div>
-            <div class="text-sm font-rajdhani text-gray-300 leading-relaxed bg-black/40 rounded-xl p-3 border border-bordergray" id="fb-text"></div>
+        <button onclick="closeFB()" class="flex-shrink-0 ml-4 text-gray-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Left column: scores + pool + runtime -->
+        <div class="space-y-5">
+
+          <!-- Score breakdown -->
+          <div class="bg-black/40 border border-bordergray rounded-xl p-4 space-y-3">
+            <div class="text-[10px] font-orbitron text-gray-400 uppercase tracking-widest mb-1">Score Breakdown</div>
+            <div id="fb-scores" class="space-y-2"></div>
+            <div class="border-t border-bordergray pt-2 flex items-center justify-between">
+              <span class="text-[10px] font-orbitron text-gray-400 uppercase">Total</span>
+              <span class="font-orbitron font-bold text-lg text-cyan-400" id="fb-total">—</span>
+            </div>
+          </div>
+
+          <!-- Groq Pool Status -->
+          <div class="bg-black/40 border border-bordergray rounded-xl p-4">
+            <div class="text-[10px] font-orbitron text-gray-400 uppercase tracking-widest mb-2">Groq Key Pool</div>
+            <div id="fb-pool" class="space-y-1 text-xs font-mono">Loading…</div>
+          </div>
+
+          <!-- Runtime Evidence -->
+          <div class="bg-black/40 border border-bordergray rounded-xl p-4">
+            <div class="text-[10px] font-orbitron text-gray-400 uppercase tracking-widest mb-2">Runtime Evidence</div>
+            <div id="fb-runtime" class="text-xs font-mono text-gray-400">—</div>
+          </div>
+
         </div>
-        <div class="flex justify-end">
-            <button onclick="closeFB()" class="px-4 py-2 rounded-xl text-xs font-orbitron bg-bordergray text-gray-300 hover:bg-zinc-800">Close</button>
+
+        <!-- Right column: feedback + lists -->
+        <div class="lg:col-span-2 space-y-4">
+
+          <!-- AI Feedback -->
+          <div class="bg-black/40 border border-bordergray rounded-xl p-4">
+            <div class="text-[10px] font-orbitron text-gray-400 uppercase tracking-widest mb-2" id="fb-feedback-label">AI Feedback</div>
+            <div class="text-sm font-rajdhani text-gray-200 leading-relaxed" id="fb-text">—</div>
+          </div>
+
+          <!-- Strengths / Weaknesses -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="bg-emerald-950/30 border border-emerald-600/20 rounded-xl p-4">
+              <div class="text-[10px] font-orbitron text-emerald-400 uppercase tracking-widest mb-2">✅ Strengths</div>
+              <ul id="fb-strengths" class="space-y-1 text-xs font-rajdhani text-emerald-200"></ul>
+            </div>
+            <div class="bg-rose-950/30 border border-rose-600/20 rounded-xl p-4">
+              <div class="text-[10px] font-orbitron text-rose-400 uppercase tracking-widest mb-2">❌ Weaknesses</div>
+              <ul id="fb-weaknesses" class="space-y-1 text-xs font-rajdhani text-rose-200"></ul>
+            </div>
+          </div>
+
+          <!-- Test lists -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="bg-black/40 border border-emerald-600/20 rounded-xl p-3">
+              <div class="text-[10px] font-orbitron text-emerald-400 uppercase tracking-widest mb-2">✅ Passed Tests</div>
+              <ul id="fb-passed" class="space-y-0.5 text-xs font-rajdhani text-emerald-300"></ul>
+            </div>
+            <div class="bg-black/40 border border-rose-600/20 rounded-xl p-3">
+              <div class="text-[10px] font-orbitron text-rose-400 uppercase tracking-widest mb-2">❌ Failed Tests</div>
+              <ul id="fb-failed" class="space-y-0.5 text-xs font-rajdhani text-rose-300"></ul>
+            </div>
+            <div class="bg-black/40 border border-amber-600/20 rounded-xl p-3">
+              <div class="text-[10px] font-orbitron text-amber-400 uppercase tracking-widest mb-2">⚠ Unverified</div>
+              <ul id="fb-unverified" class="space-y-0.5 text-xs font-rajdhani text-amber-300"></ul>
+            </div>
+          </div>
+
+          <!-- Comparative notes -->
+          <div id="fb-notes-wrap" class="bg-black/40 border border-bordergray rounded-xl p-4 hidden">
+            <div class="text-[10px] font-orbitron text-gray-400 uppercase tracking-widest mb-2">📝 Notes</div>
+            <ul id="fb-notes" class="space-y-1 text-xs font-rajdhani text-gray-300"></ul>
+          </div>
+
+          <!-- Loading / error state -->
+          <div id="fb-loading" class="text-center py-8 text-gray-500 font-orbitron text-xs hidden">⏳ Loading evaluation details…</div>
+          <div id="fb-error"   class="text-center py-4 text-rose-400 font-orbitron text-xs hidden"></div>
+
         </div>
+      </div>
+
+      <div class="px-6 py-4 border-t border-bordergray flex justify-end bg-black/20">
+        <button onclick="closeFB()" class="px-5 py-2 rounded-xl text-xs font-orbitron bg-bordergray text-gray-300 hover:bg-zinc-700 transition-all">Close</button>
+      </div>
     </div>
+  </div>
 </div>
 
 <!-- ── Admin Login Modal ── -->
@@ -755,7 +842,7 @@ function renderParticipants(){
                 ${canUnlock?`<button onclick="unlockSubmission('${e(p.participant_id)}',this)" class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600 hover:text-white transition-all">🔓 Unlock</button>`:''}
                 ${hasRepo && !isEvaluating ? `<button onclick="triggerEval('${e(p.participant_id)}','${e(p.participant_name)}',this)" class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg ${isEvaluated ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-600/30 hover:bg-indigo-600' : isFailed ? 'bg-rose-600/20 text-rose-400 border border-rose-500/30 hover:bg-rose-600' : 'bg-crimson-600/20 text-crimson-500 border border-crimson-600/30 hover:bg-crimson-600'} hover:text-white transition-all">${isEvaluated ? '🔄 Re-evaluate' : isFailed ? '⚠️ Retry Eval' : '🤖 Evaluate'}</button>` : ''}
                 ${isEvaluating ? `<span class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-500/20 animate-pulse">⏳ Evaluating...</span>` : ''}
-                ${(isEvaluated&&p.ai_feedback)?`<button onclick='showFB("${e(p.participant_name)}",${JSON.stringify({ai_score:p.ai_score,ui_score:p.ui_score,task_match_score:p.task_match_score,logic_score:p.logic_score,creativity_score:p.creativity_score,code_quality_score:p.code_quality_score,ai_feedback:p.ai_feedback})})' class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-violet-600/20 text-violet-400 border border-violet-600/30 hover:bg-violet-600 hover:text-white transition-all">📋 Feedback</button>`:''}
+                ${(isEvaluated||isFailed)?`<button onclick="showEvalDetail('${e(p.participant_id)}','${e(p.participant_name)}',${p.is_imposter?'true':'false'})" class="text-xs font-orbitron px-2.5 py-1.5 rounded-lg bg-violet-600/20 text-violet-400 border border-violet-600/30 hover:bg-violet-600 hover:text-white transition-all">📋 AI Report</button>`:''}
             </div>
         </div>`;
     }).join('');
@@ -1578,40 +1665,170 @@ function renderFlow(){
     }).join('');
 }
 
-// ── Feedback / Error detail modal ─────────────────────────────────────────────
-function showFB(name,data){
-    const isFailed = !!data.eval_failed;
-    document.getElementById('fb-name').innerText = isFailed
-        ? name + ' — ⚠ Evaluation Failed'
-        : name + ' — AI Score: '+(data.ai_score!=null?data.ai_score:'--')+'/100';
+// ── AI Evaluation Detail Modal ────────────────────────────────────────────────
 
-    if(isFailed){
-        // Show error details instead of score breakdown
-        document.getElementById('fb-scores').innerHTML =
-            `<div class="col-span-3 bg-rose-950/30 border border-rose-500/30 rounded-xl p-3 text-left">
-                <div class="text-[10px] font-orbitron text-rose-400 mb-1 uppercase tracking-widest">What Happened</div>
-                <div class="text-xs font-rajdhani text-rose-300">The AI evaluation pipeline failed. Use the <strong>🔄 Retry AI</strong> button to try again, or use <strong>✏ Manual Score</strong> to enter a score manually.</div>
-            </div>`;
-    } else {
-        const breakdowns=[
-            {l:'Task Completion',v:data.task_match_score,m:40},
-            {l:'UI / UX',v:data.ui_score,m:20},
-            {l:'Logic & Code',v:data.logic_score,m:20},
-            {l:'Responsiveness',v:data.code_quality_score,m:10},
-            {l:'Creativity',v:data.creativity_score,m:10}
-        ];
-        document.getElementById('fb-scores').innerHTML=breakdowns.map(b=>
-            `<div class="bg-black/40 border border-bordergray rounded-xl p-2">
-                <div class="text-[10px] font-orbitron text-gray-400 mb-1">${e(b.l)}</div>
-                <div class="text-base font-orbitron font-bold text-cyan-400">${b.v!=null?b.v:'--'}<span class="text-xs text-gray-500">/${b.m}</span></div>
-            </div>`).join('');
-    }
-    const label = document.getElementById('fb-feedback-label');
-    if(label) label.textContent = isFailed ? 'Error Message' : 'AI Feedback';
-    document.getElementById('fb-text').innerText=data.ai_feedback||(isFailed?'No error details recorded.':'No feedback available.');
-    document.getElementById('fb-modal').classList.remove('hidden');
+// Helper: render a score bar row
+function _fbScoreRow(label, value, max) {
+    const v   = value != null ? value : null;
+    const pct = (v != null && max > 0) ? Math.round((v / max) * 100) : 0;
+    const col  = pct >= 75 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-rose-500';
+    return `<div>
+        <div class="flex justify-between text-[11px] font-orbitron mb-0.5">
+            <span class="text-gray-300">${e(label)}</span>
+            <span class="text-cyan-400 font-bold">${v != null ? v : '—'}<span class="text-gray-500 text-[10px]">/${max}</span></span>
+        </div>
+        <div class="h-1.5 bg-black/40 rounded-full overflow-hidden">
+            <div class="${col} h-full rounded-full transition-all" style="width:${pct}%"></div>
+        </div>
+    </div>`;
 }
-function closeFB(){ document.getElementById('fb-modal').classList.add('hidden'); }
+
+// Helper: render a simple list, show "None recorded" when empty
+function _fbList(items) {
+    if (!items || items.length === 0) return '<li class="text-gray-500 italic">None recorded</li>';
+    return items.map(x => `<li class="flex gap-1.5"><span class="opacity-40 flex-shrink-0">•</span><span>${e(String(x))}</span></li>`).join('');
+}
+
+async function showEvalDetail(pid, name, isImposter) {
+    // Open modal immediately with loading state
+    const modal = document.getElementById('fb-modal');
+    document.getElementById('fb-name').textContent     = name;
+    document.getElementById('fb-meta').textContent     = '—';
+    document.getElementById('fb-total').textContent    = '—';
+    document.getElementById('fb-scores').innerHTML     = '';
+    document.getElementById('fb-text').textContent     = '—';
+    document.getElementById('fb-strengths').innerHTML  = '';
+    document.getElementById('fb-weaknesses').innerHTML = '';
+    document.getElementById('fb-passed').innerHTML     = '';
+    document.getElementById('fb-failed').innerHTML     = '';
+    document.getElementById('fb-unverified').innerHTML = '';
+    document.getElementById('fb-notes').innerHTML      = '';
+    document.getElementById('fb-pool').innerHTML       = 'Loading…';
+    document.getElementById('fb-runtime').innerHTML    = '—';
+    document.getElementById('fb-notes-wrap').classList.add('hidden');
+    document.getElementById('fb-loading').classList.remove('hidden');
+    document.getElementById('fb-error').classList.add('hidden');
+    const badge = document.getElementById('fb-imposter-badge');
+    if (isImposter) badge.classList.remove('hidden'); else badge.classList.add('hidden');
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    try {
+        // Fetch evaluation detail and pool status in parallel
+        const [evalRes, poolRes] = await Promise.allSettled([
+            fetch(API + '/api/admin/evaluation/' + pid, { headers: authHeaders() }),
+            fetch(API + '/api/admin/groq-pool-status',   { headers: authHeaders() })
+        ]);
+
+        document.getElementById('fb-loading').classList.add('hidden');
+
+        // ── Pool status ───────────────────────────────────────────────────────
+        let poolHtml = '<span class="text-gray-500">Unavailable</span>';
+        if (poolRes.status === 'fulfilled' && poolRes.value.ok) {
+            const pd = await poolRes.value.json().catch(() => ({}));
+            if (pd.success && pd.keys) {
+                poolHtml = pd.keys.map(k => {
+                    const dot  = k.healthy ? '🟢' : '🔴';
+                    const info = k.healthy ? 'healthy' : `cooling ${k.cooldown_remaining_s}s`;
+                    return `<div class="flex justify-between gap-2"><span>${dot} Key ${k.index}</span><span class="text-gray-500">…${e(k.suffix)} · ${info}</span></div>`;
+                }).join('');
+            }
+        }
+        document.getElementById('fb-pool').innerHTML = poolHtml;
+
+        // ── Evaluation detail ─────────────────────────────────────────────────
+        if (evalRes.status !== 'fulfilled' || !evalRes.value.ok) {
+            document.getElementById('fb-error').textContent = '⚠ Could not load evaluation details.';
+            document.getElementById('fb-error').classList.remove('hidden');
+            return;
+        }
+
+        const data = await evalRes.value.json().catch(() => null);
+        if (!data || !data.success) {
+            document.getElementById('fb-error').textContent = '⚠ ' + (data?.message || 'Evaluation data unavailable.');
+            document.getElementById('fb-error').classList.remove('hidden');
+            return;
+        }
+
+        const ev = data.evaluation || {};
+        const pt = data.participant || {};
+        const isFailed = ev.status === 'FAILED' || ev.status === 'Failed';
+
+        // Meta line
+        document.getElementById('fb-meta').textContent =
+            [pt.original_team, pt.shuffled_group, pt.task_title ? 'Task ' + pt.task_number + ': ' + pt.task_title : null, pt.role_name]
+            .filter(Boolean).join(' → ');
+
+        // Title
+        document.getElementById('fb-name').textContent = name +
+            (ev.total_score != null ? ' — ' + ev.total_score + '/' + (ev.max_total || 100) : '');
+
+        // Score breakdown
+        const sc = ev.scores || {};
+        const criteria = [
+            { l: 'Task Completion', k: 'task_completion', m: 40 },
+            { l: 'UI / UX',         k: 'ui',              m: 20 },
+            { l: 'Responsiveness',  k: 'responsiveness',  m: 20 },
+            { l: 'Creativity',      k: 'creativity',      m: 20 },
+        ];
+        document.getElementById('fb-scores').innerHTML = isFailed
+            ? `<div class="bg-rose-950/30 border border-rose-500/30 rounded-xl p-3 text-xs font-rajdhani text-rose-300">
+                  Evaluation failed. Use <strong>⚠️ Retry Eval</strong> or enter a manual score.
+               </div>`
+            : criteria.map(c => _fbScoreRow(c.l, sc[c.k], c.m)).join('');
+
+        document.getElementById('fb-total').textContent =
+            ev.total_score != null ? ev.total_score + ' / ' + (ev.max_total || 100) : '—';
+
+        // Feedback
+        document.getElementById('fb-feedback-label').textContent = isFailed ? 'Error Details' : 'AI Feedback';
+        document.getElementById('fb-text').textContent = ev.error_message || ev.feedback || (isFailed ? 'No error details recorded.' : 'No feedback available.');
+
+        // Lists
+        document.getElementById('fb-strengths').innerHTML  = _fbList(ev.strengths);
+        document.getElementById('fb-weaknesses').innerHTML = _fbList(ev.weaknesses);
+        document.getElementById('fb-passed').innerHTML     = _fbList(ev.passed_tests);
+        document.getElementById('fb-failed').innerHTML     = _fbList(ev.failed_tests);
+        document.getElementById('fb-unverified').innerHTML = _fbList(ev.unverified_tests);
+
+        // Comparative notes
+        if (ev.comparative_notes && ev.comparative_notes.length > 0) {
+            document.getElementById('fb-notes').innerHTML = _fbList(ev.comparative_notes);
+            document.getElementById('fb-notes-wrap').classList.remove('hidden');
+        }
+
+        // Runtime evidence
+        const rt = ev.runtime;
+        let rtHtml = '<span class="text-gray-500">Not run / unavailable</span>';
+        if (rt) {
+            const pageCol   = rt.page_loaded ? 'text-emerald-400' : 'text-rose-400';
+            const errsHtml  = rt.console_errors && rt.console_errors.length
+                ? rt.console_errors.map(err => `<div class="text-rose-300 truncate">• ${e(String(err))}</div>`).join('')
+                : '<div class="text-gray-500">None</div>';
+            rtHtml = `<div class="space-y-1">
+                <div>Mode: <span class="text-gray-200">${e(rt.mode)}</span></div>
+                <div>Page loaded: <span class="${pageCol} font-bold">${rt.page_loaded ? 'YES' : 'NO'}</span></div>
+                ${rt.duration_ms != null ? `<div>Duration: <span class="text-gray-200">${rt.duration_ms}ms</span></div>` : ''}
+                <div class="pt-1 text-[10px] font-orbitron text-gray-500 uppercase tracking-widest">Console errors</div>
+                ${errsHtml}
+            </div>`;
+        }
+        document.getElementById('fb-runtime').innerHTML = rtHtml;
+
+    } catch (err) {
+        document.getElementById('fb-loading').classList.add('hidden');
+        document.getElementById('fb-error').textContent = '⚠ Network error: ' + err.message;
+        document.getElementById('fb-error').classList.remove('hidden');
+    }
+}
+
+// Keep showFB as a no-op alias so any stale cached HTML references don't crash
+function showFB(name, data) { console.warn('[showFB] deprecated — use showEvalDetail'); }
+
+function closeFB() {
+    document.getElementById('fb-modal').classList.add('hidden');
+    document.body.style.overflow = '';
+}
 
 // ── Manual main-event score override ─────────────────────────────────────────
 // Opens a small inline prompt. Uses the existing admin endpoint /api/admin/update-main-event-score.

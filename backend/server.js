@@ -1729,14 +1729,17 @@ app.post('/api/admin/fizzbuzz/run-code', requireAdmin, async (req, res) => {
     const code        = fzSub.fizz_output;
     const submittedBy = fzSub.submitted_by;
 
-    const GROQ_KEY = process.env.GROQ_API_KEY;
-
-    if (!GROQ_KEY) {
-        console.error('[run-code] Groq API configuration missing.');
-        return res.json({ success: false, message: "Groq API configuration missing.", error: "Groq API configuration missing." });
+    // Use the shared key pool — rotates across all GROQ_API_KEY_1…10, handles 429 cooldown
+    const { getKeyPool: _getPool } = require('./lib/evaluation/groqKeyPool');
+    let groqKey;
+    try {
+      groqKey = _getPool().next();
+    } catch (poolErr) {
+      console.error('[run-code] Key pool error:', poolErr.message);
+      return res.json({ success: false, message: poolErr.message, error: poolErr.message });
     }
 
-    console.log(`[run-code] API key exists. Language: ${language}, Code length: ${code.length}`);
+    console.log(`[run-code] Using pooled key. Language: ${language}, Code length: ${code.length}`);
 
     const prompt = `Language name: ${language}
 Source code:
@@ -1749,7 +1752,7 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${GROQ_KEY}`
+                'Authorization': `Bearer ${groqKey}`
             },
             body: JSON.stringify({
                 model: 'llama-3.3-70b-versatile',
@@ -1767,6 +1770,9 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
 
     if (!groqResponse.ok) {
         const errText = await groqResponse.text().catch(() => 'No text returned');
+        if (groqResponse.status === 429 || groqResponse.status === 413) {
+          try { _getPool().markRateLimited(groqKey); } catch (_) {}
+        }
         console.error(`[run-code] Groq API Error: ${groqResponse.status} - ${errText}`);
         return res.json({ success: false, message: `Groq API Error: ${groqResponse.status} - ${errText}`, error: `Groq API Error: ${groqResponse.status} - ${errText}` });
     }
@@ -1776,6 +1782,7 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
     try {
         groqData = await groqResponse.json();
         output = (groqData.choices?.[0]?.message?.content || '').trim();
+        try { _getPool().markSuccess(groqKey); } catch (_) {}
     } catch (e) {
         console.error('[run-code] Malformed response from Groq:', e.message);
         return res.json({ success: false, message: "Malformed response from Groq.", error: "Malformed response from Groq." });
@@ -2136,6 +2143,108 @@ app.post('/api/admin/recover-evaluations', requireAdmin, async (req, res) => {
     auditLog('recover_evaluations', 'system', { count: candidates.length });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── GET /api/admin/evaluation/:participantId ──────────────────────────────────
+// Returns full AI evaluation detail from the evaluations table (criteria scores,
+// strengths, weaknesses, test lists, runtime evidence).  Admin-only.
+
+app.get('/api/admin/evaluation/:participantId', requireAdmin, async (req, res) => {
+  try {
+    const participantId = String(req.params.participantId || '').trim();
+    if (!(/^\d+$/.test(participantId) || isUUID(participantId))) {
+      return res.status(400).json({ success: false, message: 'Invalid participant ID.' });
+    }
+
+    // Fetch rich evaluation row
+    const { data: evalRow, error: evalErr } = await supabase
+      .from('evaluations')
+      .select('*')
+      .eq('participant_id', participantId)
+      .eq('game_id', 'main_event')
+      .maybeSingle();
+
+    // Also fetch the assignment row for context (name, role, team, scores)
+    const { data: asgn, error: asgnErr } = await supabase
+      .from('main_event_assignments')
+      .select(
+        'participant_id, participant_name, original_team, shuffled_group, ' +
+        'task_number, task_title, role_name, work_description, is_imposter, person_slot, ' +
+        'github_repo, evaluation_status, submission_status, ' +
+        'ai_score, task_match_score, ui_score, code_quality_score, creativity_score, logic_score, ai_feedback'
+      )
+      .eq('participant_id', participantId)
+      .maybeSingle();
+
+    if (asgnErr) return res.status(500).json({ success: false, message: asgnErr.message });
+    if (!asgn)   return res.status(404).json({ success: false, message: 'Participant not found.' });
+
+    const cs = evalRow?.criteria_scores || {};
+    return res.json({
+      success: true,
+      participant: {
+        id:             asgn.participant_id,
+        name:           asgn.participant_name,
+        original_team:  asgn.original_team,
+        shuffled_group: asgn.shuffled_group,
+        task_number:    asgn.task_number,
+        task_title:     asgn.task_title,
+        role_name:      asgn.role_name,
+        work_description: asgn.work_description,
+        is_imposter:    asgn.is_imposter,
+        person_slot:    asgn.person_slot,
+        github_repo:    asgn.github_repo,
+      },
+      evaluation: {
+        status:          evalRow?.status || asgn.evaluation_status || 'NOT_STARTED',
+        total_score:     evalRow?.total_score ?? asgn.ai_score ?? null,
+        max_total:       evalRow?.max_total    ?? 100,
+        feedback:        evalRow?.feedback     || asgn.ai_feedback || null,
+        started_at:      evalRow?.started_at   || null,
+        completed_at:    evalRow?.completed_at || null,
+        error_message:   evalRow?.error_message || null,
+        // Per-criterion scores — prefer evaluations table, fall back to assignment columns
+        scores: {
+          task_completion: cs.task_completion ?? asgn.task_match_score ?? null,
+          ui:              cs.ui              ?? asgn.ui_score          ?? null,
+          responsiveness:  cs.responsiveness  ?? asgn.code_quality_score ?? null,
+          creativity:      cs.creativity      ?? asgn.creativity_score  ?? null,
+        },
+        // Rich AI output — only present after evaluation
+        strengths:          cs.strengths          || [],
+        weaknesses:         cs.weaknesses         || [],
+        passed_tests:       cs.passed_tests       || [],
+        failed_tests:       cs.failed_tests       || [],
+        unverified_tests:   cs.unverified_tests   || [],
+        comparative_notes:  cs.comparative_notes  || [],
+        // Runtime evidence summary (nulls if runtime unavailable)
+        runtime: evalRow?.runtime_evidence
+          ? {
+              available:   evalRow.runtime_evidence.runtime_available || false,
+              mode:        evalRow.runtime_evidence.runtime_mode      || 'UNAVAILABLE',
+              page_loaded: evalRow.runtime_evidence.page_loaded       || false,
+              duration_ms: evalRow.runtime_evidence.runtime_duration_ms || null,
+              console_errors: (evalRow.runtime_evidence.console_errors || []).slice(0, 5),
+            }
+          : null,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── GET /api/admin/groq-pool-status ──────────────────────────────────────────
+// Returns the health of every key in the Groq API pool.  Admin-only, diagnostic.
+
+app.get('/api/admin/groq-pool-status', requireAdmin, (req, res) => {
+  try {
+    const { getKeyPool } = require('./lib/evaluation/groqKeyPool');
+    const pool = getKeyPool();
+    return res.json({ success: true, pool_size: pool.size, keys: pool.status() });
+  } catch (err) {
+    return res.json({ success: false, pool_size: 0, keys: [], message: err.message });
   }
 });
 
