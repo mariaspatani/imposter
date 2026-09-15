@@ -135,14 +135,14 @@ let _instance = null;
  * on first call.  Subsequent calls return the cached instance.
  *
  * Key discovery (in order):
- *   GROQ_API_KEY_1, GROQ_API_KEY_2, …, GROQ_API_KEY_7
+ *   GROQ_API_KEY_1, GROQ_API_KEY_2, …, GROQ_API_KEY_10
  *   GROQ_API_KEY  (fallback if none of the numbered keys are set)
  */
 function getKeyPool() {
   if (_instance) return _instance;
 
   const numbered = [];
-  for (let i = 1; i <= 7; i++) {
+  for (let i = 1; i <= 10; i++) {
     const v = (process.env[`GROQ_API_KEY_${i}`] || '').trim();
     if (v) numbered.push(v);
   }
