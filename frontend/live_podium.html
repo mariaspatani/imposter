@@ -1,27 +1,35 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LIVE PODIUM | ASTRA 11.0</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+    <title>LIVE PODIUM | ASTHRA 11.0</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap"
+        rel="stylesheet">
     <style>
         :root {
-            --bg: #050308;
-            --gold: #ffd700;
-            --silver: #c0c0c0;
-            --bronze: #cd7f32;
+            --bg-base: #030105;
             --cyan: #00f0ff;
-            --crimson: #ff1e43;
-            --purple: #8b00ff;
+            --magenta: #ff0055;
+            --gold: #ffcc00;
+            --silver: #e0f7fa;
+            --bronze: #ff6600;
+            --hud-bg: rgba(10, 15, 30, 0.6);
         }
 
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { 
-            background: var(--bg); 
-            color: #fff; 
-            font-family: 'Rajdhani', sans-serif; 
-            overflow: hidden; /* Hide scrollbars for cinematic view */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg-base);
+            color: #fff;
+            font-family: 'Rajdhani', sans-serif;
+            overflow: hidden;
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -29,251 +37,814 @@
         }
 
         /* ── BACKGROUND ── */
-        .bg-layer { position: absolute; inset: 0; pointer-events: none; }
-        
-        #nebula {
-            background: radial-gradient(circle at 50% 40%, rgba(139,0,255,0.15) 0%, rgba(0,240,255,0.05) 40%, var(--bg) 80%);
+        .bg-nebula {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background:
+                radial-gradient(circle at 20% 30%, rgba(139, 0, 255, 0.25) 0%, transparent 50%),
+                radial-gradient(circle at 80% 40%, rgba(0, 240, 255, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 50% 80%, rgba(255, 0, 85, 0.1) 0%, transparent 60%);
             z-index: 1;
         }
-        
-        .scanlines {
-            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1));
-            background-size: 100% 4px;
-            z-index: 10;
-            opacity: 0.3;
+
+        canvas#particle-canvas {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .fog {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 50vh;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+            z-index: 3;
+            pointer-events: none;
         }
 
         .grid-floor {
-            position: absolute; bottom: 0; left: 0; width: 100%; height: 30vh;
-            background: 
-                linear-gradient(transparent 0%, rgba(0, 240, 255, 0.4) 2%, transparent 3%),
-                linear-gradient(90deg, transparent 0%, rgba(0, 240, 255, 0.4) 2%, transparent 3%);
-            background-size: 50px 50px;
-            transform: perspective(500px) rotateX(60deg);
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 25vh;
+            background:
+                linear-gradient(transparent 0%, rgba(0, 240, 255, 0.3) 2%, transparent 3%),
+                linear-gradient(90deg, transparent 0%, rgba(0, 240, 255, 0.3) 2%, transparent 3%);
+            background-size: 80px 40px;
+            transform: perspective(600px) rotateX(75deg);
             transform-origin: bottom;
+            z-index: 4;
+            opacity: 0.6;
+            box-shadow: inset 0 50px 100px var(--bg-base);
+        }
+
+        /* ── SPOTLIGHTS ── */
+        .spotlight {
+            position: absolute;
+            top: -10%;
+            width: 300px;
+            height: 120vh;
+            background: radial-gradient(ellipse at top, rgba(255, 255, 255, 0.1), transparent 70%);
+            transform-origin: top;
             z-index: 2;
-            animation: gridMove 20s linear infinite;
-            opacity: 0.4;
-            border-top: 2px solid var(--cyan);
-            box-shadow: 0 -10px 30px rgba(0,240,255,0.2);
+            pointer-events: none;
+            filter: blur(15px);
         }
-        @keyframes gridMove { from { background-position: 0 0; } to { background-position: 0 500px; } }
 
-        canvas#particle-canvas { position: absolute; inset: 0; z-index: 3; }
+        .spotlight-1 {
+            left: 50%;
+            transform: translateX(-50%) rotate(0deg);
+            background: radial-gradient(ellipse at top, rgba(255, 204, 0, 0.2), transparent 70%);
+        }
 
-        /* ── TOP BAR ── */
-        .top-bar {
-            position: absolute; top: 0; left: 0; width: 100%; padding: 20px 40px;
-            display: flex; justify-content: space-between; align-items: flex-start;
+        .spotlight-2 {
+            left: 25%;
+            transform: translateX(-50%) rotate(15deg);
+            background: radial-gradient(ellipse at top, rgba(0, 240, 255, 0.15), transparent 70%);
+        }
+
+        .spotlight-3 {
+            left: 75%;
+            transform: translateX(-50%) rotate(-15deg);
+            background: radial-gradient(ellipse at top, rgba(255, 102, 0, 0.15), transparent 70%);
+        }
+
+        /* ── HUD PANELS ── */
+        .hud-left,
+        .hud-right {
+            position: absolute;
+            top: 24px;
             z-index: 20;
+            background: var(--hud-bg);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            padding: 15px 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
+        }
+
+        .hud-left {
+            left: 40px;
+            clip-path: polygon(0 0, 100% 0, 100% 70%, 85% 100%, 0 100%);
+        }
+
+        .hud-right {
+            right: 24px;
+            clip-path: polygon(0 0, 100% 0, 100% 100%, 15% 100%, 0 70%);
+            align-items: flex-end;
+            text-align: right;
+        }
+
+        .hud-left .datetime-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .hud-left .icon {
+            font-size: 1.5rem;
+            color: var(--cyan);
+        }
+
+        .hud-left .text-group {
             font-family: 'Orbitron', sans-serif;
+            font-size: 1rem;
+            color: #fff;
+            line-height: 1.2;
+            text-shadow: 0 0 5px var(--cyan);
         }
-        .clock {
-            color: var(--cyan); text-shadow: 0 0 10px rgba(0,240,255,0.5);
-            font-size: 1.2rem; font-weight: 700; line-height: 1.4;
+
+        .hud-right .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #00ff66;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 900;
+            font-size: 1.5rem;
+            text-shadow: 0 0 10px #00ff66;
         }
-        .live-status {
-            display: flex; align-items: center; gap: 10px;
-            color: var(--crimson); font-weight: 900; font-size: 1.5rem;
-            text-shadow: 0 0 15px rgba(255,30,67,0.8);
+
+        .live-dot {
+            width: 14px;
+            height: 14px;
+            background: #00ff66;
+            border-radius: 50%;
+            animation: pulse-green 1s infinite alternate;
+        }
+
+        .hud-right .update-text {
+            font-size: 0.85rem;
+            color: #aaa;
+            letter-spacing: 1px;
+        }
+
+        .hud-right .hud-subtitle {
+            margin-top: 10px;
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.5);
             letter-spacing: 2px;
+            line-height: 1.4;
         }
-        .live-status .dot {
-            width: 12px; height: 12px; background: var(--crimson); border-radius: 50%;
-            animation: pulse 1s infinite alternate;
-        }
-        .update-text { font-family: 'Rajdhani', sans-serif; font-size: 0.9rem; color: #aaa; text-shadow: none; font-weight: 600; letter-spacing: 1px; }
 
-        /* ── HEADER ── */
-        header { text-align: center; margin-top: 5vh; position: relative; z-index: 20; }
+        /* ── SIDE BANNERS ── */
+        .side-banner {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 40px;
+            opacity: 0.4;
+        }
+
+        .banner-left {
+            left: 40px;
+        }
+
+        .banner-right {
+            right: 24px;
+            top: 65%;
+            opacity: 0.28;
+            padding-left: 20px;
+            border-left: 1px solid rgba(0, 240, 255, 0.6);
+            box-shadow: -4px 0 15px -2px rgba(0, 240, 255, 0.3);
+        }
+
+        .banner-text {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            font-size: 1.5rem;
+            letter-spacing: 10px;
+            color: transparent;
+            -webkit-text-stroke: 1px rgba(255, 255, 255, 0.5);
+        }
+
+        .banner-logo {
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 900;
+            font-size: 6rem;
+            color: rgba(255, 255, 255, 0.1);
+            text-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+        }
+
+        /* ── HERO HEADER ── */
+        header.hero {
+            text-align: center;
+            margin-top: 6vh;
+            position: relative;
+            z-index: 20;
+        }
+
         .title-glitch {
-            font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: clamp(3rem, 6vw, 6rem);
-            color: #fff; text-shadow: 0 0 20px var(--cyan), 0 0 40px var(--cyan);
-            letter-spacing: 8px; position: relative; display: inline-block;
-            animation: textGlow 2s infinite alternate;
-        }
-        .title-glitch::before, .title-glitch::after {
-            content: attr(data-text); position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            opacity: 0.8; z-index: -1;
-        }
-        .title-glitch::before { color: var(--cyan); z-index: -1; animation: glitch-anim 3s infinite linear alternate-reverse; }
-        .title-glitch::after { color: var(--crimson); z-index: -2; animation: glitch-anim 2.5s infinite linear alternate-reverse; }
-        
-        .scan-light {
-            position: absolute; top: 0; left: -100%; width: 50px; height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent);
-            transform: skewX(-20deg);
-            animation: scanLight 4s infinite cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        .subtitle {
-            font-family: 'Rajdhani', sans-serif; font-size: 1.5rem; font-weight: 700;
-            color: #aaa; letter-spacing: 10px; margin-top: -10px; text-transform: uppercase;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 900;
+            font-size: 5rem;
+            color: #fff;
+            text-shadow: 0 0 15px var(--cyan), 0 0 30px var(--cyan);
+            letter-spacing: 10px;
+            text-transform: uppercase;
+            position: relative;
+            display: inline-block;
         }
 
-        /* ── GRAND PODIUM ── */
+        .title-glitch::before,
+        .title-glitch::after {
+            content: attr(data-text);
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.8;
+            z-index: -1;
+        }
+
+        .title-glitch::before {
+            color: var(--cyan);
+            animation: glitch-anim 4s infinite linear alternate-reverse;
+        }
+
+        .title-glitch::after {
+            color: var(--magenta);
+            animation: glitch-anim 3.5s infinite linear alternate-reverse;
+        }
+
+        .hero .subtitle {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--magenta);
+            letter-spacing: 8px;
+            margin-top: 5px;
+            text-shadow: 0 0 10px var(--magenta);
+        }
+
+        .hero .tagline {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            color: #aaa;
+            letter-spacing: 5px;
+            margin-top: 15px;
+            display: inline-block;
+            padding-top: 10px;
+            border-top: 1px solid rgba(0, 240, 255, 0.3);
+        }
+
+        /* ── MAIN PODIUM ── */
         .podium-area {
-            flex-grow: 1; display: flex; justify-content: center; align-items: flex-end;
-            padding-bottom: 8vh; z-index: 20; position: relative; gap: 20px;
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            padding-bottom: 8vh;
+            z-index: 20;
+            position: relative;
+            gap: 30px;
+        }
+
+        .podium-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            position: relative;
+            transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .podium-card {
-            display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-            position: relative; transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            background: rgba(10, 15, 20, 0.85);
+            backdrop-filter: blur(12px);
+            border: 2px solid;
+            border-radius: 16px;
+            padding: 30px 20px;
+            text-align: center;
+            width: 320px;
+            position: relative;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.8), 0 10px 30px rgba(0, 0, 0, 0.5);
+            transition: all 0.5s ease;
         }
 
-        .card-inner {
-            background: rgba(10, 10, 15, 0.8); backdrop-filter: blur(10px);
-            border: 2px solid; border-radius: 12px;
-            padding: 20px; text-align: center; width: 280px;
-            position: relative; z-index: 2;
-            display: flex; flex-direction: column; align-items: center;
+        .medal-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 900;
+            font-size: 1.5rem;
+            position: absolute;
+            top: -30px;
+            background: #111;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+            border: 3px solid;
         }
 
-        .platform {
-            width: 300px; border-radius: 8px 8px 0 0;
-            margin-top: 15px; position: relative; z-index: 1;
-            box-shadow: inset 0 10px 30px rgba(255,255,255,0.1);
+        .rank-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.9rem;
+            letter-spacing: 4px;
+            color: #bbb;
+            margin-top: 20px;
+            margin-bottom: 10px;
         }
 
-        /* Rank 1 */
-        .rank-1 { order: 2; z-index: 3; }
-        .rank-1 .card-inner { border-color: var(--gold); box-shadow: 0 0 30px rgba(255,215,0,0.3); transform: scale(1.15); margin-bottom: 20px; }
-        .rank-1 .platform { height: 25vh; background: linear-gradient(to bottom, rgba(255,215,0,0.4), rgba(255,215,0,0.05)); border-top: 4px solid var(--gold); }
-        .spotlight {
-            position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-            width: 600px; height: 100vh; pointer-events: none;
-            background: radial-gradient(ellipse at bottom, rgba(255,215,0,0.15) 0%, transparent 60%);
-            z-index: 0;
+        .team-name {
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 900;
+            font-size: 2.2rem;
+            text-transform: uppercase;
+            word-break: break-word;
+            min-height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
         }
-        .trophy-container { position: absolute; top: -140px; left: 50%; transform: translateX(-50%); z-index: 10; }
-        .trophy { font-size: 6rem; filter: drop-shadow(0 0 20px var(--gold)); animation: trophySpin 4s infinite linear; }
 
-        /* Rank 2 */
-        .rank-2 { order: 1; z-index: 2; }
-        .rank-2 .card-inner { border-color: var(--silver); box-shadow: 0 0 20px rgba(192,192,192,0.2); }
-        .rank-2 .platform { height: 15vh; background: linear-gradient(to bottom, rgba(192,192,192,0.3), rgba(192,192,192,0.05)); border-top: 4px solid var(--silver); }
-
-        /* Rank 3 */
-        .rank-3 { order: 3; z-index: 1; }
-        .rank-3 .card-inner { border-color: var(--bronze); box-shadow: 0 0 20px rgba(205,127,50,0.2); }
-        .rank-3 .platform { height: 8vh; background: linear-gradient(to bottom, rgba(205,127,50,0.3), rgba(205,127,50,0.05)); border-top: 4px solid var(--bronze); }
-
-        /* Card Content */
-        .medal { font-size: 2.5rem; line-height: 1; margin-bottom: 5px; filter: drop-shadow(0 0 10px rgba(255,255,255,0.3)); }
-        .rank-1 .medal { font-size: 3.5rem; }
-        .rank-title { font-family: 'Orbitron', sans-serif; font-size: 0.8rem; letter-spacing: 3px; color: #aaa; margin-bottom: 10px; }
-        .team-name { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.8rem; text-transform: uppercase; word-break: break-word; min-height: 65px; display: flex; align-items: center; justify-content: center; }
-        .rank-1 .team-name { color: var(--gold); font-size: 2.2rem; text-shadow: 0 0 15px rgba(255,215,0,0.5); }
-        .rank-2 .team-name { color: var(--silver); text-shadow: 0 0 15px rgba(192,192,192,0.5); }
-        .rank-3 .team-name { color: var(--bronze); text-shadow: 0 0 15px rgba(205,127,50,0.5); }
-        
-        .score { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 3rem; margin-top: 10px; }
-        .rank-1 .score { color: var(--gold); font-size: 4rem; }
-
-        .flash { animation: flashHighlight 1s ease-out; }
-
-        /* ── BOTTOM MARQUEE ── */
-        .marquee-container {
-            position: absolute; bottom: 0; left: 0; width: 100%;
-            background: rgba(0,0,0,0.8); border-top: 1px solid var(--cyan);
-            padding: 10px 0; z-index: 30; overflow: hidden; white-space: nowrap;
-            box-shadow: 0 -5px 20px rgba(0,240,255,0.2);
+        .score-box {
+            margin-top: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            width: 80%;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
         }
-        .marquee {
-            display: inline-block; font-family: 'Orbitron', sans-serif; font-size: 1.2rem;
-            color: var(--cyan); letter-spacing: 2px;
-            animation: scrollMarquee 20s linear infinite;
+
+        .score {
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 900;
+            font-size: 3rem;
+            line-height: 1;
+        }
+
+        .points-label {
+            font-size: 0.8rem;
+            color: #888;
+            letter-spacing: 2px;
+            margin-top: 5px;
+        }
+
+        /* Pedestals */
+        .pedestal {
+            width: 340px;
+            position: relative;
+            z-index: 5;
+            margin-top: -10px;
+            background: linear-gradient(to bottom, rgba(30, 30, 40, 0.9), rgba(10, 10, 15, 0.9));
+            border-top: 4px solid;
+            border-left: 1px solid;
+            border-right: 1px solid;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+        }
+
+        .pedestal::before {
+            content: '';
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            bottom: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            pointer-events: none;
+        }
+
+        /* Rank 1 (Gold) */
+        .rank-1-container {
+            order: 2;
+            z-index: 30;
+        }
+
+        .card-1 {
+            border-color: var(--gold);
+            box-shadow: 0 0 40px rgba(255, 204, 0, 0.3), inset 0 0 20px rgba(255, 204, 0, 0.1);
+            width: 360px;
+            padding: 40px 20px;
+        }
+
+        .card-1 .medal-icon {
+            border-color: var(--gold);
+            color: var(--gold);
+            text-shadow: 0 0 10px var(--gold);
+        }
+
+        .card-1 .team-name {
+            color: var(--gold);
+            text-shadow: 0 0 20px rgba(255, 204, 0, 0.5);
+            font-size: 2.8rem;
+        }
+
+        .card-1 .score {
+            color: var(--gold);
+            text-shadow: 0 0 15px rgba(255, 204, 0, 0.5);
+        }
+
+        .pedestal-1 {
+            height: 22vh;
+            border-color: var(--gold);
+            box-shadow: 0 -10px 40px rgba(255, 204, 0, 0.2);
+            width: 380px;
+        }
+
+        .laurel-wreath {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100px;
+            height: 100px;
+            background: url('data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M10,50 A40,40 0 0,1 90,50" fill="none" stroke="%23ffcc00" stroke-width="2" stroke-dasharray="5,5" opacity="0.3"/></svg>') no-repeat center;
+            background-size: contain;
+        }
+
+        /* Rank 2 (Silver/Cyan) */
+        .rank-2-container {
+            order: 1;
+            z-index: 20;
+        }
+
+        .card-2 {
+            border-color: var(--silver);
+            box-shadow: 0 0 30px rgba(0, 240, 255, 0.2);
+        }
+
+        .card-2 .medal-icon {
+            border-color: var(--silver);
+            color: var(--silver);
+            text-shadow: 0 0 10px var(--silver);
+        }
+
+        .card-2 .team-name {
+            color: var(--silver);
+            text-shadow: 0 0 15px rgba(0, 240, 255, 0.5);
+        }
+
+        .pedestal-2 {
+            height: 14vh;
+            border-color: var(--silver);
+            box-shadow: 0 -10px 30px rgba(0, 240, 255, 0.15);
+        }
+
+        /* Rank 3 (Bronze/Orange) */
+        .rank-3-container {
+            order: 3;
+            z-index: 10;
+        }
+
+        .card-3 {
+            border-color: var(--bronze);
+            box-shadow: 0 0 30px rgba(255, 102, 0, 0.2);
+        }
+
+        .card-3 .medal-icon {
+            border-color: var(--bronze);
+            color: var(--bronze);
+            text-shadow: 0 0 10px var(--bronze);
+        }
+
+        .card-3 .team-name {
+            color: var(--bronze);
+            text-shadow: 0 0 15px rgba(255, 102, 0, 0.5);
+        }
+
+        .pedestal-3 {
+            height: 8vh;
+            border-color: var(--bronze);
+            box-shadow: 0 -10px 30px rgba(255, 102, 0, 0.15);
+        }
+
+        .flash {
+            animation: flashHighlight 0.8s ease-out;
+        }
+
+        /* ── FOOTER TICKER ── */
+        .footer-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 60px;
+            background: rgba(5, 5, 10, 0.9);
+            border-top: 2px solid var(--cyan);
+            display: flex;
+            align-items: center;
+            z-index: 40;
+            box-shadow: 0 -5px 30px rgba(0, 240, 255, 0.2);
+            backdrop-filter: blur(10px);
+        }
+
+        .footer-icon {
+            padding: 0 30px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--cyan);
+            white-space: nowrap;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            background: rgba(0, 240, 255, 0.1);
+            z-index: 2;
+        }
+
+        .left-icon {
+            border-right: 1px solid rgba(0, 240, 255, 0.3);
+        }
+
+        .right-icon {
+            border-left: 1px solid rgba(0, 240, 255, 0.3);
+            color: #fff;
+        }
+
+        .ticker-wrapper {
+            flex-grow: 1;
+            overflow: hidden;
+            position: relative;
+            height: 100%;
+            display: flex;
+            align-items: center;
+        }
+
+        .ticker-content {
+            display: inline-block;
+            white-space: nowrap;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #ddd;
+            letter-spacing: 2px;
+            animation: scrollMarquee 25s linear infinite;
         }
 
         /* ── ANIMATIONS ── */
-        @keyframes pulse { 0% { opacity: 0.4; box-shadow: 0 0 0 0 rgba(255,30,67,0.7); } 100% { opacity: 1; box-shadow: 0 0 0 10px rgba(255,30,67,0); } }
-        @keyframes textGlow { 0% { text-shadow: 0 0 10px var(--cyan); } 100% { text-shadow: 0 0 30px var(--cyan), 0 0 50px rgba(0,240,255,0.5); } }
-        @keyframes scanLight { 0% { left: -100%; } 20% { left: 200%; } 100% { left: 200%; } }
-        @keyframes scrollMarquee { 0% { transform: translateX(100vw); } 100% { transform: translateX(-100%); } }
-        @keyframes trophySpin { 0% { transform: translateY(0) rotateY(0deg); } 50% { transform: translateY(-15px) rotateY(180deg); } 100% { transform: translateY(0) rotateY(360deg); } }
-        @keyframes flashHighlight { 0% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.1); filter: brightness(2); } 100% { transform: scale(1); filter: brightness(1); } }
-        
+        @keyframes pulse-green {
+            0% {
+                opacity: 0.5;
+                box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.7);
+            }
+
+            100% {
+                opacity: 1;
+                box-shadow: 0 0 0 10px rgba(0, 255, 102, 0);
+            }
+        }
+
+        @keyframes scrollMarquee {
+            0% {
+                transform: translateX(100%);
+            }
+
+            100% {
+                transform: translateX(-100%);
+            }
+        }
+
+        @keyframes flashHighlight {
+            0% {
+                filter: brightness(1);
+                transform: translateY(0);
+            }
+
+            50% {
+                filter: brightness(2) drop-shadow(0 0 20px #fff);
+                transform: translateY(-10px);
+            }
+
+            100% {
+                filter: brightness(1);
+                transform: translateY(0);
+            }
+        }
+
         @keyframes glitch-anim {
-            0% { clip-path: inset(10% 0 30% 0); transform: translate(-2px, 2px); }
-            20% { clip-path: inset(80% 0 5% 0); transform: translate(2px, -2px); }
-            40% { clip-path: inset(40% 0 50% 0); transform: translate(-2px, -2px); }
-            60% { clip-path: inset(15% 0 70% 0); transform: translate(2px, 2px); }
-            80% { clip-path: inset(60% 0 10% 0); transform: translate(-2px, -2px); }
-            100% { clip-path: inset(30% 0 40% 0); transform: translate(2px, 2px); }
+            0% {
+                clip-path: inset(10% 0 30% 0);
+                transform: translate(-2px, 2px);
+            }
+
+            20% {
+                clip-path: inset(80% 0 5% 0);
+                transform: translate(2px, -2px);
+            }
+
+            40% {
+                clip-path: inset(40% 0 50% 0);
+                transform: translate(-2px, -2px);
+            }
+
+            60% {
+                clip-path: inset(15% 0 70% 0);
+                transform: translate(2px, 2px);
+            }
+
+            80% {
+                clip-path: inset(60% 0 10% 0);
+                transform: translate(-2px, -2px);
+            }
+
+            100% {
+                clip-path: inset(30% 0 40% 0);
+                transform: translate(2px, 2px);
+            }
+        }
+
+        /* Confetti Canvas */
+        #confetti-canvas {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 50;
         }
 
         /* Responsive */
+        @media (max-width: 1200px) {
+            .hero .title-glitch {
+                font-size: 4rem;
+            }
+
+            .podium-card {
+                width: 260px;
+            }
+
+            .card-1 {
+                width: 300px;
+            }
+
+            .pedestal {
+                width: 280px;
+            }
+
+            .pedestal-1 {
+                width: 320px;
+            }
+
+            .side-banner {
+                display: none;
+            }
+        }
+
         @media (max-width: 900px) {
-            .podium-area { flex-direction: column; align-items: center; justify-content: flex-start; gap: 20px; overflow-y: auto; padding-top: 20px; padding-bottom: 60px; height: 60vh; }
-            .rank-1, .rank-2, .rank-3 { order: unset !important; }
-            .platform { display: none; } /* Hide 3D platform on mobile */
-            .rank-1 .card-inner { transform: scale(1); margin-bottom: 0; }
-            .trophy-container { top: -80px; }
-            .trophy { font-size: 4rem; }
-            .title-glitch { font-size: 3rem; }
-            header { margin-top: 10vh; }
+            .podium-area {
+                flex-direction: column;
+                align-items: center;
+                justify-content: flex-start;
+                gap: 20px;
+                overflow-y: auto;
+                padding-top: 20px;
+                padding-bottom: 80px;
+                height: 65vh;
+            }
+
+            .rank-1-container,
+            .rank-2-container,
+            .rank-3-container {
+                order: unset !important;
+            }
+
+            .pedestal {
+                display: none;
+            }
+
+            .card-1 {
+                width: 320px;
+                margin-bottom: 0;
+            }
+
+            .hero .title-glitch {
+                font-size: 3rem;
+            }
+
+            .hud-left,
+            .hud-right {
+                display: none;
+            }
+
+            /* Hide HUD on mobile for cleaner look */
+            header.hero {
+                margin-top: 10vh;
+            }
         }
     </style>
 </head>
+
 <body>
-    <div class="bg-layer" id="nebula"></div>
-    <div class="bg-layer scanlines"></div>
+    <div class="bg-nebula"></div>
     <div class="grid-floor"></div>
     <canvas id="particle-canvas"></canvas>
+    <canvas id="confetti-canvas"></canvas>
+    <div class="fog"></div>
 
-    <div class="top-bar">
-        <div class="clock" id="clock">--<br>--</div>
-        <div class="live-status"><span class="dot"></span> LIVE <span class="update-text">Updates every 5s</span></div>
+    <div class="spotlight spotlight-2"></div>
+    <div class="spotlight spotlight-1"></div>
+    <div class="spotlight spotlight-3"></div>
+
+    <div class="hud-left">
+        <div class="datetime-row">
+            <div class="icon">📅</div>
+            <div class="text-group" id="date-display">-- --- ----<br>------</div>
+        </div>
+        <div class="datetime-row">
+            <div class="icon">🕒</div>
+            <div class="text-group" id="time-display">--:--:-- --<br>IST</div>
+        </div>
     </div>
 
-    <header>
-        <div class="title-glitch" data-text="LIVE PODIUM">LIVE PODIUM<div class="scan-light"></div></div>
-        <div class="subtitle">ASTRA 11.0 • THE IMPOSTER PROJECT</div>
+    <div class="hud-right">
+        <div class="live-indicator"><span class="live-dot"></span> LIVE</div>
+        <div class="update-text">UPDATES EVERY 5s</div>
+        <div class="hud-subtitle">SAME MINDS<br>DIFFERENT ROLES<br>ONE WINNER</div>
+    </div>
+
+    <div class="side-banner banner-left">
+        <div class="banner-text">ASTHRA 11.0</div>
+        <div class="banner-logo">A</div>
+    </div>
+    <div class="side-banner banner-right">
+        <div class="banner-text">THE IMPOSTER PROJECT</div>
+        <div class="banner-logo">A</div>
+    </div>
+
+    <header class="hero">
+        <h1 class="title-glitch" data-text="LIVE PODIUM">LIVE PODIUM</h1>
+        <div class="subtitle">ASTHRA 11.0 | THE IMPOSTER PROJECT</div>
+        <div class="tagline">SKILLS • STRATEGY • SUSPICION • VICTORY</div>
     </header>
 
     <main class="podium-area">
         <!-- Rank 2 -->
-        <div class="podium-card rank-2" id="card-2">
-            <div class="card-inner">
-                <div class="medal">🥈</div>
+        <div class="podium-container rank-2-container" id="container-2">
+            <div class="podium-card card-2" id="card-2">
+                <div class="medal-icon">2</div>
                 <div class="rank-title">2ND PLACE</div>
                 <div class="team-name" id="name-2">--</div>
-                <div class="score" id="score-2">0</div>
+                <div class="score-box">
+                    <div class="score" id="score-2">0</div>
+                    <div class="points-label">POINTS</div>
+                </div>
             </div>
-            <div class="platform"></div>
+            <div class="pedestal pedestal-2"></div>
         </div>
 
         <!-- Rank 1 -->
-        <div class="podium-card rank-1" id="card-1">
-            <div class="spotlight"></div>
-            <div class="trophy-container"><div class="trophy">🏆</div></div>
-            <div class="card-inner">
-                <div class="medal">🥇</div>
+        <div class="podium-container rank-1-container" id="container-1">
+            <div class="podium-card card-1" id="card-1">
+                <div class="medal-icon">1</div>
                 <div class="rank-title">1ST PLACE</div>
                 <div class="team-name" id="name-1">--</div>
-                <div class="score" id="score-1">0</div>
+                <div class="score-box">
+                    <div class="score" id="score-1">0</div>
+                    <div class="points-label">POINTS</div>
+                </div>
             </div>
-            <div class="platform"></div>
+            <div class="pedestal pedestal-1">
+                <div class="laurel-wreath"></div>
+            </div>
         </div>
 
         <!-- Rank 3 -->
-        <div class="podium-card rank-3" id="card-3">
-            <div class="card-inner">
-                <div class="medal">🥉</div>
+        <div class="podium-container rank-3-container" id="container-3">
+            <div class="podium-card card-3" id="card-3">
+                <div class="medal-icon">3</div>
                 <div class="rank-title">3RD PLACE</div>
                 <div class="team-name" id="name-3">--</div>
-                <div class="score" id="score-3">0</div>
+                <div class="score-box">
+                    <div class="score" id="score-3">0</div>
+                    <div class="points-label">POINTS</div>
+                </div>
             </div>
-            <div class="platform"></div>
+            <div class="pedestal pedestal-3"></div>
         </div>
     </main>
 
-    <div class="marquee-container">
-        <div class="marquee" id="marquee-content">
-            🏆 ASTRA 11.0 LIVE • SOFTWARE COMPUTING LAB • THE IMPOSTER PROJECT 🏆 Awaiting Scores...
+    <footer class="footer-bar">
+        <div class="footer-icon left-icon">🏆 HALL OF FAME</div>
+        <div class="ticker-wrapper">
+            <div class="ticker-content" id="marquee-content">
+                AWAITING SCORES...
+            </div>
         </div>
-    </div>
+        <div class="footer-icon right-icon">ASTRA 11.0 LIVE • BEYOND CODE</div>
+    </footer>
 
     <script>
         var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '')
@@ -283,62 +854,121 @@
         // ── Digital Clock ──
         function updateClock() {
             const now = new Date();
-            const dateOpts = { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'long', year: 'numeric' };
+            const dateOpts = { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', weekday: 'long' };
             const timeOpts = { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
-            
-            const dateStr = new Intl.DateTimeFormat('en-GB', dateOpts).format(now).toUpperCase();
+
+            // Format: "18 SEP 2026\nTHURSDAY"
+            const parts = new Intl.DateTimeFormat('en-GB', dateOpts).formatToParts(now);
+            let day = '', month = '', year = '', weekday = '';
+            parts.forEach(p => {
+                if (p.type === 'day') day = p.value;
+                if (p.type === 'month') month = p.value;
+                if (p.type === 'year') year = p.value;
+                if (p.type === 'weekday') weekday = p.value;
+            });
+            const dateStr = `${day} ${month.toUpperCase()} ${year}<br>${weekday.toUpperCase()}`;
+
             const timeStr = new Intl.DateTimeFormat('en-US', timeOpts).format(now).toUpperCase();
-            
-            document.getElementById('clock').innerHTML = dateStr + '<br>' + timeStr + ' IST';
+
+            document.getElementById('date-display').innerHTML = dateStr;
+            document.getElementById('time-display').innerHTML = timeStr + '<br><span style="color:#aaa;font-size:0.8rem">IST</span>';
         }
         setInterval(updateClock, 1000);
         updateClock();
 
         // ── Particle Background ──
-        const canvas = document.getElementById('particle-canvas');
-        const ctx = canvas.getContext('2d');
+        const pCanvas = document.getElementById('particle-canvas');
+        const pCtx = pCanvas.getContext('2d');
         let particles = [];
-        
-        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-        window.addEventListener('resize', resize); resize();
 
-        for (let i = 0; i < 100; i++) {
+        function resizeCanvas() {
+            pCanvas.width = window.innerWidth; pCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas); resizeCanvas();
+
+        const colors = ['rgba(0, 240, 255, 0.6)', 'rgba(255, 0, 85, 0.6)', 'rgba(255, 204, 0, 0.6)'];
+        for (let i = 0; i < 80; i++) {
             particles.push({
-                x: Math.random() * canvas.width,
-                y: Math.random() * canvas.height,
+                x: Math.random() * pCanvas.width,
+                y: Math.random() * pCanvas.height,
                 size: Math.random() * 2 + 1,
-                speedY: Math.random() * -0.5 - 0.1,
-                color: Math.random() > 0.5 ? 'rgba(0, 240, 255, 0.6)' : 'rgba(255, 30, 67, 0.6)' // cyan or red
+                speedY: Math.random() * -0.3 - 0.1,
+                color: colors[Math.floor(Math.random() * colors.length)]
             });
         }
-        for (let i = 0; i < 150; i++) {
+        for (let i = 0; i < 150; i++) { // Stars
             particles.push({
-                x: Math.random() * canvas.width,
-                y: Math.random() * canvas.height,
+                x: Math.random() * pCanvas.width,
+                y: Math.random() * pCanvas.height,
                 size: Math.random() * 1.5,
                 speedY: 0,
-                color: 'rgba(255, 255, 255, 0.8)' // stars
+                color: 'rgba(255, 255, 255, 0.8)'
             });
         }
 
         function animateParticles() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
             particles.forEach(p => {
-                ctx.fillStyle = p.color;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                ctx.fill();
-                
-                if (p.speedY !== 0) { // floating dust
+                pCtx.fillStyle = p.color;
+                pCtx.beginPath();
+                pCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                pCtx.fill();
+
+                if (p.speedY !== 0) {
                     p.y += p.speedY;
-                    if (p.y < 0) p.y = canvas.height;
-                } else { // twinkling stars
+                    if (p.y < 0) p.y = pCanvas.height;
+                } else {
                     if (Math.random() < 0.01) p.size = Math.random() * 2;
                 }
             });
             requestAnimationFrame(animateParticles);
         }
         animateParticles();
+
+        // ── Confetti System ──
+        const cCanvas = document.getElementById('confetti-canvas');
+        const cCtx = cCanvas.getContext('2d');
+        let confettis = [];
+
+        function resizeConfetti() { cCanvas.width = window.innerWidth; cCanvas.height = window.innerHeight; }
+        window.addEventListener('resize', resizeConfetti); resizeConfetti();
+
+        function fireConfetti() {
+            for (let i = 0; i < 100; i++) {
+                confettis.push({
+                    x: cCanvas.width / 2,
+                    y: cCanvas.height / 2,
+                    vx: (Math.random() - 0.5) * 20,
+                    vy: (Math.random() - 1) * 20,
+                    size: Math.random() * 10 + 5,
+                    color: `hsl(${Math.random() * 60 + 30}, 100%, 50%)`, // Gold/Yellow spectrum
+                    rot: Math.random() * 360,
+                    rotSpeed: (Math.random() - 0.5) * 10
+                });
+            }
+        }
+
+        function animateConfetti() {
+            cCtx.clearRect(0, 0, cCanvas.width, cCanvas.height);
+            for (let i = confettis.length - 1; i >= 0; i--) {
+                let c = confettis[i];
+                c.x += c.vx;
+                c.y += c.vy;
+                c.vy += 0.5; // gravity
+                c.rot += c.rotSpeed;
+
+                cCtx.save();
+                cCtx.translate(c.x, c.y);
+                cCtx.rotate(c.rot * Math.PI / 180);
+                cCtx.fillStyle = c.color;
+                cCtx.fillRect(-c.size / 2, -c.size / 2, c.size, c.size);
+                cCtx.restore();
+
+                if (c.y > cCanvas.height) confettis.splice(i, 1);
+            }
+            requestAnimationFrame(animateConfetti);
+        }
+        animateConfetti();
 
         // ── Data Fetching & Animation ──
         let currentData = { 1: { team: '', score: -1 }, 2: { team: '', score: -1 }, 3: { team: '', score: -1 } };
@@ -362,7 +992,7 @@
             try {
                 const response = await fetch(API_BASE + '/api/podium');
                 const data = await response.json();
-                
+
                 if (data.success && data.podium) {
                     updatePodium(data.podium);
                 }
@@ -373,13 +1003,14 @@
 
         function updatePodium(teams) {
             const top3 = teams.slice(0, 3);
-            
+            let firstPlaceChanged = false;
+
             top3.forEach((team, index) => {
                 const rank = index + 1;
                 const nameEl = document.getElementById('name-' + rank);
                 const scoreEl = document.getElementById('score-' + rank);
                 const cardEl = document.getElementById('card-' + rank);
-                
+
                 if (!nameEl || !scoreEl) return;
 
                 const newTeam = team.team;
@@ -387,15 +1018,17 @@
                 const oldData = currentData[rank];
 
                 if (oldData.team !== newTeam) {
-                    // Team changed position!
                     nameEl.innerText = newTeam;
                     cardEl.classList.remove('flash');
-                    void cardEl.offsetWidth; // trigger reflow
+                    void cardEl.offsetWidth;
                     cardEl.classList.add('flash');
+
+                    if (rank === 1 && oldData.team !== '') {
+                        firstPlaceChanged = true;
+                    }
                 }
 
                 if (oldData.score !== newScore) {
-                    // Score changed
                     const startScore = oldData.score === -1 ? 0 : oldData.score;
                     animateValue(scoreEl, startScore, newScore, 1000);
                 }
@@ -403,19 +1036,26 @@
                 currentData[rank] = { team: newTeam, score: newScore };
             });
 
+            if (firstPlaceChanged) {
+                fireConfetti();
+            }
+
             // Update Marquee
             if (top3.length > 0) {
-                let marqueeStr = '🏆 ASTRA 11.0 LIVE • SOFTWARE COMPUTING LAB • THE IMPOSTER PROJECT • ';
-                teams.slice(0, 10).forEach((t, i) => {
-                    marqueeStr += `${i+1}. ${t.team} (${t.grand_total} Pts) • `;
+                let marqueeStr = '';
+                teams.forEach((t, i) => {
+                    marqueeStr += `🏆 ${t.team} — ${t.grand_total} PTS • `;
                 });
-                document.getElementById('marquee-content').innerText = marqueeStr;
+                marqueeStr += `ASTRA 11.0 LIVE • SOFTWARE COMPUTING LAB`;
+
+                // Duplicate it to make scroll seamless
+                document.getElementById('marquee-content').innerHTML = marqueeStr + ' &nbsp;&nbsp;&nbsp;&nbsp; ' + marqueeStr;
             }
         }
 
         fetchPodium();
         setInterval(fetchPodium, 5000);
-
     </script>
 </body>
+
 </html>
