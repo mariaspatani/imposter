@@ -437,6 +437,75 @@ async function evaluateAllReadyPairs(supabase, options = {}) {
   };
 }
 
+/**
+ * Auto-starts pairwise evaluation for every pair that involves participantId
+ * as soon as BOTH candidates have submitted their GitHub repositories.
+ *
+ * Fired right after a submission lands, so the second participant's submission
+ * kicks off the competitive evaluation for the pair without any manual action.
+ * Idempotent — pairs already EVALUATED/EVALUATING are skipped, and readiness is
+ * derived from the LIVE assignment rows rather than the last-synced status.
+ */
+async function autoEvaluatePairsForParticipant(supabase, participantId, options = {}) {
+  const results = [];
+
+  let pairs = [];
+  try {
+    const findPairs = async () => {
+      const [rA, rB] = await Promise.all([
+        supabase.from('competitive_evaluation_pairs').select('*').eq('participant_a_id', participantId),
+        supabase.from('competitive_evaluation_pairs').select('*').eq('participant_b_id', participantId),
+      ]);
+      const seen = new Map();
+      [...(rA.data || []), ...(rB.data || [])].forEach(p => { if (p) seen.set(p.id, p); });
+      return [...seen.values()];
+    };
+
+    pairs = await findPairs();
+    if (pairs.length === 0) {
+      // Pairs may not be synced yet if the admin hasn't opened the pairwise tab.
+      const { data: assignments } = await supabase.from('main_event_assignments').select('*');
+      await syncPairsWithDatabase(supabase, assignments || []);
+      pairs = await findPairs();
+    }
+  } catch (err) {
+    console.error('[PairwiseEvaluator] auto-eval pair lookup failed:', err.message);
+    return results;
+  }
+
+  for (const p of pairs) {
+    if (p.status === 'EVALUATED' || p.status === 'EVALUATING') continue;
+
+    // Readiness must reflect the live submissions, not the last-synced status.
+    const [resA, resB] = await Promise.all([
+      supabase.from('main_event_assignments').select('github_repo, evaluation_status').eq('participant_id', p.participant_a_id).maybeSingle(),
+      supabase.from('main_event_assignments').select('github_repo, evaluation_status').eq('participant_id', p.participant_b_id).maybeSingle(),
+    ]);
+
+    const a = resA.data;
+    const b = resB.data;
+    if (!a?.github_repo || !b?.github_repo) continue; // still waiting on one side
+
+    // Coordinate with any still-running individual evaluations so the pairwise
+    // (authoritative) scores are never overwritten by a late individual eval.
+    // The partner's own runEvaluation fires a fresh pair-check once it
+    // completes, so skipping here is safe — the trigger self-heals.
+    if (a.evaluation_status === 'Queued' || a.evaluation_status === 'Evaluating' ||
+        b.evaluation_status === 'Queued' || b.evaluation_status === 'Evaluating') {
+      continue;
+    }
+
+    const res = await evaluatePairById(supabase, p.id, options);
+    results.push({ pair_id: p.id, role_name: p.role_name, result: res });
+
+    if (res.status === 'EVALUATED') {
+      console.log(`[PairwiseEvaluator] Auto-evaluated pair ${p.id} (${p.role_name}) after both submissions landed.`);
+    }
+  }
+
+  return results;
+}
+
 module.exports = {
   build12AuthoritativePairs,
   computePairStatus,
@@ -444,4 +513,5 @@ module.exports = {
   validatePairwiseScores,
   evaluatePairById,
   evaluateAllReadyPairs,
+  autoEvaluatePairsForParticipant,
 };

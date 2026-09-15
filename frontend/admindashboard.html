@@ -1971,6 +1971,31 @@ async function renderPairwiseDashboard() {
                 </div>
             ` : '';
 
+            const clampTxt = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; };
+
+            // Inline AI evaluation report — primary display lives in this pairwise tab
+            const pairReport = (p.status === 'EVALUATED' && p.evaluation_result) ? (() => {
+                const er = p.evaluation_result;
+                const pa = er.participant_a || {};
+                const pb = er.participant_b || {};
+                const fa = pa.feedback ? `<div class="text-gray-300">${e(clampTxt(pa.feedback, 130))}</div>` : '';
+                const fb = pb.feedback ? `<div class="text-gray-300">${e(clampTxt(pb.feedback, 130))}</div>` : '';
+                const cmp = er.comparison?.overall_comparison ? `<div class="text-gray-300">${e(clampTxt(er.comparison.overall_comparison, 170))}</div>` : '';
+                return `
+                <div class="mt-3 p-2.5 rounded-lg bg-violet-950/20 border border-violet-500/20 text-[11px] font-rajdhani space-y-2">
+                    <div class="text-[9px] font-orbitron text-violet-400 uppercase tracking-wider">🤖 AI Evaluation Report</div>
+                    <div class="space-y-1">
+                        <div><span class="text-gray-400 font-bold">${e(pa.name || 'Candidate A')}:</span> ${fa || '<span class="text-gray-600">No feedback</span>'}</div>
+                        <div><span class="text-gray-400 font-bold">${e(pb.name || 'Candidate B')}:</span> ${fb || '<span class="text-gray-600">No feedback</span>'}</div>
+                    </div>
+                    ${cmp ? `<div class="border-t border-violet-500/10 pt-1.5">
+                        <div class="text-[9px] font-orbitron text-gray-500 uppercase tracking-wider mb-0.5">Judge Notes</div>
+                        ${cmp}
+                    </div>` : ''}
+                    <div class="text-[9px] font-orbitron text-violet-300/70 pt-0.5">💡 Open a candidate report for the full score breakdown →</div>
+                </div>`;
+            })() : '';
+
             return `
             <div class="bg-cardgray border border-bordergray rounded-2xl p-4 shadow-xl flex flex-col justify-between space-y-4 hover:border-gray-600 transition-all">
                 <!-- Header -->
@@ -2004,6 +2029,7 @@ async function renderPairwiseDashboard() {
                             <div class="text-[10px] font-mono truncate pt-1">
                                 ${candA.github_repo ? `<a href="${e(candA.github_repo)}" target="_blank" class="text-cyan-400 hover:underline">GitHub ↗</a>` : '<span class="text-gray-600">No repo</span>'}
                             </div>
+                            ${p.status === 'EVALUATED' && candA.participant_id ? `<div class="pt-1.5"><button onclick="showEvalDetail('${e(candA.participant_id)}','${e(candA.participant_name || 'Candidate A')}',${candA.is_imposter ? 'true' : 'false'})" class="w-full text-[10px] font-orbitron py-1 px-2 rounded-md bg-violet-600/20 text-violet-400 border border-violet-600/30 hover:bg-violet-600 hover:text-white transition-all">📋 AI Report</button></div>` : ''}
                         </div>
 
                         <!-- Candidate B -->
@@ -2021,10 +2047,12 @@ async function renderPairwiseDashboard() {
                             <div class="text-[10px] font-mono truncate pt-1">
                                 ${candB.github_repo ? `<a href="${e(candB.github_repo)}" target="_blank" class="text-cyan-400 hover:underline">GitHub ↗</a>` : '<span class="text-gray-600">No repo</span>'}
                             </div>
+                            ${p.status === 'EVALUATED' && candB.participant_id ? `<div class="pt-1.5"><button onclick="showEvalDetail('${e(candB.participant_id)}','${e(candB.participant_name || 'Candidate B')}',${candB.is_imposter ? 'true' : 'false'})" class="w-full text-[10px] font-orbitron py-1 px-2 rounded-md bg-violet-600/20 text-violet-400 border border-violet-600/30 hover:bg-violet-600 hover:text-white transition-all">📋 AI Report</button></div>` : ''}
                         </div>
                     </div>
 
                     ${compSummary}
+                    ${pairReport}
                 </div>
 
                 <!-- Footer Action -->

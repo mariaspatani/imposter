@@ -30,7 +30,8 @@ const {
   build12AuthoritativePairs,
   syncPairsWithDatabase,
   evaluatePairById,
-  evaluateAllReadyPairs
+  evaluateAllReadyPairs,
+  autoEvaluatePairsForParticipant
 } = require('./lib/evaluation/pairwiseEvaluator');
 
 // ── Startup validation ────────────────────────────────────────────────────────
@@ -502,6 +503,24 @@ async function runEvaluation(participantId, assignmentData, options = {}) {
         ai_feedback:       'Evaluation failed: ' + evalErr.message.slice(0, 200)
       }).eq('participant_id', participantId);
     } catch (_) {}
+  } finally {
+    // Auto-start the pairwise competitive evaluation once BOTH candidates in
+    // the pair have submitted.  Runs after the individual eval so competitive
+    // scores are authoritative (never overwritten by a late individual eval)
+    // and so existing runtime evidence from the evaluations table is reused.
+    try {
+      const auto = await autoEvaluatePairsForParticipant(supabase, participantId, {
+        retry: options.retry === true,
+        force: options.force === true
+      });
+      for (const a of auto) {
+        if (a.result?.status === 'EVALUATED') {
+          console.log('[pair-auto-eval] Pair', a.pair_id, '(', a.role_name, ') auto-evaluated after both submissions landed.');
+        }
+      }
+    } catch (err) {
+      console.error('[pair-auto-eval] Unhandled error for', participantId, ':', err.message);
+    }
   }
 }
 
