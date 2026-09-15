@@ -59,7 +59,15 @@ dist/
 build/
 .cache/
 
+
+# -- Local tests & test results (run locally, never pushed) -------------------
+tests/
+test-results/
 # -- Misc ---------------------------------------------------------------------
 *.pid
 *.seed
 *.pid.lock
+
+# -- Old test files (moved to tests/, kept locally) --------------------------
+backend/_*_test.js
+backend/_evaluation_pipeline_test.js
