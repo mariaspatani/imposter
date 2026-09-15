@@ -1535,8 +1535,8 @@ app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, a
   }
 });
 
-// ── GET /api/admin/cohort-report/:taskNumber? ─────────────────────────────────
-app.get('/api/admin/cohort-report/:taskNumber?', requireAdmin, async (req, res) => {
+// ── GET /api/admin/cohort-report ──────────────────────────────────────────────
+const handleCohortReport = async (req, res) => {
   try {
     const taskNumber = req.params.taskNumber ? parseInt(req.params.taskNumber, 10) : null;
     const { data: assignments, error: asgnErr } = await supabase
@@ -1577,7 +1577,10 @@ app.get('/api/admin/cohort-report/:taskNumber?', requireAdmin, async (req, res) 
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
-});
+};
+
+app.get('/api/admin/cohort-report', requireAdmin, handleCohortReport);
+app.get('/api/admin/cohort-report/:taskNumber', requireAdmin, handleCohortReport);
 
 // ── GET /api/admin/event-progress ─────────────────────────────────────────────
 
