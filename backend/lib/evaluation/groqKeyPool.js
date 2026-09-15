@@ -6,8 +6,8 @@
  * Manages a pool of Groq API keys to work around per-key rate limits.
  *
  * Key resolution order (highest priority first):
- *   1. GROQ_API_KEY_1 … GROQ_API_KEY_7  (dedicated pool keys)
- *   2. GROQ_API_KEY                      (legacy single-key fallback)
+ *   1. GROQ_API_KEY_1 … GROQ_API_KEY_10  (dedicated pool keys)
+ *   2. GROQ_API_KEY                       (legacy single-key fallback)
  *
  * Rotation strategy: strict round-robin across all healthy keys.
  * When a key receives a 429 (rate_limit_exceeded) or 413 response it is put
@@ -62,7 +62,7 @@ class GroqKeyPool {
   markRateLimited(key, overrideMs) {
     const dur = overrideMs !== undefined ? overrideMs : this._cooldownMs;
     this._cooldownUntil.set(key, Date.now() + dur);
-    console.warn(`[GroqKeyPool] Key …${key.slice(-6)} is rate-limited — cooling for ${dur / 1000}s`);
+    console.warn(`[GroqKeyPool] Key ...${key.slice(-6)} is rate-limited — cooling for ${dur / 1000}s`);
   }
 
   /**
@@ -104,7 +104,7 @@ class GroqKeyPool {
     throw new Error(
       `All ${total} Groq API keys are rate-limited. ` +
       `Fastest recovery in ~${waitSec}s. ` +
-      'Add more keys via GROQ_API_KEY_1…GROQ_API_KEY_7.'
+      'Add more keys via GROQ_API_KEY_1...GROQ_API_KEY_10.'
     );
   }
 
@@ -161,13 +161,13 @@ function getKeyPool() {
     // Return a dummy pool that throws a clear error at call time
     console.warn('[GroqKeyPool] No Groq API keys found in environment.');
     _instance = new GroqKeyPool(['__missing__']);
-    // Mark it as rate-limited so next() always throws the "all cooled down" message
-    _instance.markRateLimited('__missing__', 0);
+    // Mark it as permanently cooled so next() always throws the "all cooled down" message
+    _instance._cooldownUntil.set('__missing__', Date.now() + 365 * 24 * 3600 * 1000);
     return _instance;
   }
 
   console.log(`[GroqKeyPool] Initialised with ${allKeys.length} key(s) ` +
-    `(suffixes: ${allKeys.map(k => '…' + k.slice(-6)).join(', ')})`);
+    `(suffixes: ${allKeys.map(k => '...' + k.slice(-6)).join(', ')})`);
 
   _instance = new GroqKeyPool(allKeys);
   return _instance;
