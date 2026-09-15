@@ -26,6 +26,12 @@
         .start-btn { font-family:'Orbitron',sans-serif; background:linear-gradient(90deg,var(--crimson-red),var(--cherry-red)); color:#fff; border:2px solid #000; padding:8px 16px; border-radius:10px; font-weight:900; letter-spacing:1px; cursor:pointer; box-shadow:0 6px 18px rgba(192,13,46,0.25); transition:transform 0.15s ease,box-shadow 0.15s ease; }
         .start-btn:hover { transform:translateY(-3px); box-shadow:0 10px 26px rgba(255,30,67,0.32); }
         .start-btn:active { transform:translateY(0); }
+        /* Participant session pill */
+        .participant-pill { display:none; align-items:center; gap:10px; background:rgba(192,13,46,0.12); border:1px solid rgba(255,30,67,0.35); border-radius:50px; padding:6px 14px 6px 10px; }
+        .participant-pill-dot { width:8px; height:8px; border-radius:50%; background:var(--green-accent); box-shadow:0 0 6px var(--green-accent); flex-shrink:0; }
+        .participant-pill-name { font-family:'Orbitron',sans-serif; font-size:0.72rem; color:var(--text-light); letter-spacing:1px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .participant-pill-logout { font-family:'Orbitron',sans-serif; font-size:0.65rem; color:var(--crimson-red); background:transparent; border:1px solid rgba(255,30,67,0.4); border-radius:20px; padding:3px 10px; cursor:pointer; letter-spacing:1px; transition:background 0.15s,color 0.15s; white-space:nowrap; }
+        .participant-pill-logout:hover { background:var(--crimson-red); color:#fff; }
         .hero { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:50px 20px 30px; position:relative; }
         .title-container { margin-bottom:20px; text-transform:uppercase; }
         .event-subtitle { font-family:'Orbitron',sans-serif; color:var(--violet); letter-spacing:4px; font-size:1.2rem; margin-bottom:5px; text-shadow:0 0 10px rgba(107,33,168,0.8); }
@@ -143,7 +149,15 @@
 
     <header>
         <div class="org-branding">ST. JOSEPH'S COLLEGE OF ENG. &amp; TECH. | <span>ASTRA 11.0</span></div>
-        <button class="start-btn" onclick="openAuthModal()">START</button>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <!-- Shown when a participant session is already active -->
+            <div class="participant-pill" id="participant-pill">
+                <span class="participant-pill-dot"></span>
+                <span class="participant-pill-name" id="participant-pill-name"></span>
+                <button class="participant-pill-logout" onclick="participantLogout()">LOGOUT</button>
+            </div>
+            <button class="start-btn" id="start-btn" onclick="openAuthModal()">START</button>
+        </div>
     </header>
 
     <section class="hero">
@@ -387,7 +401,10 @@
                         localStorage.setItem('participant_role',   user.role);
                         sessionStorage.setItem('participant_role', user.role);
                     }
-                    sessionStorage.setItem('imposterParticipant', JSON.stringify(user));
+                    // Save imposterParticipant to BOTH storages so it survives reload/back-nav
+                    var userStr = JSON.stringify(user);
+                    sessionStorage.setItem('imposterParticipant', userStr);
+                    localStorage.setItem('imposterParticipant',   userStr);
                     closeAuthModal();
                     showRoleReveal(user.role);
                     return;
@@ -432,6 +449,56 @@
                 history.pushState(null, null, window.location.href);
             }
         });
+
+        // ── Participant session pill ──────────────────────────────────────────
+        // Keys cleared on logout (all participant state)
+        var PARTICIPANT_LS_KEYS = [
+            'participant_id', 'participant_name', 'participant_role',
+            'imposterTeamCode', 'imposterTeamName', 'imposterParticipant',
+            'fizzbuzz_participant_cache', 'fizzbuzz_group',
+            'main_event_assignment_cache'
+        ];
+
+        function initParticipantPill() {
+            var pill = document.getElementById('participant-pill');
+            var nameEl = document.getElementById('participant-pill-name');
+            var startBtn = document.getElementById('start-btn');
+            if (!pill || !nameEl) return;
+
+            // Attempt to read a saved participant from localStorage
+            var savedName = localStorage.getItem('participant_name');
+            if (!savedName) {
+                // Try to pull name from the full participant object
+                try {
+                    var raw = localStorage.getItem('imposterParticipant');
+                    if (raw) {
+                        var p = JSON.parse(raw);
+                        savedName = p.name || p.participant_name || null;
+                    }
+                } catch(e) {}
+            }
+
+            if (savedName) {
+                nameEl.textContent = savedName;
+                pill.style.display = 'flex';
+                // Hide the START button — participant already joined
+                if (startBtn) startBtn.style.display = 'none';
+            }
+        }
+
+        function participantLogout() {
+            if (!confirm('Log out of this participant session?\n\nYou will need to re-enter your team code and name to rejoin.')) return;
+            // Clear all participant state
+            PARTICIPANT_LS_KEYS.forEach(function(k) {
+                localStorage.removeItem(k);
+                sessionStorage.removeItem(k);
+            });
+            // Reload so the page reflects the cleared state cleanly
+            window.location.reload();
+        }
+
+        // Run on page load
+        initParticipantPill();
     </script>
 </body>
 </html>

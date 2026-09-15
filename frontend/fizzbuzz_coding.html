@@ -13,6 +13,13 @@
         header { display:flex; justify-content:space-between; align-items:center; padding:15px 5%; background:rgba(8,7,11,0.85); backdrop-filter:blur(10px); border-bottom:2px solid var(--cherry-red); position:sticky; top:0; z-index:100; }
         .org-branding { font-family:'Orbitron',sans-serif; font-size:0.9rem; color:#aaa; letter-spacing:1px; }
         .org-branding span { color:var(--crimson-red); font-weight:bold; }
+        /* Participant session pill */
+        .participant-pill { display:none; align-items:center; gap:10px; background:rgba(192,13,46,0.12); border:1px solid rgba(255,30,67,0.35); border-radius:50px; padding:6px 14px 6px 10px; }
+        .participant-pill-dot { width:8px; height:8px; border-radius:50%; background:var(--green-accent); box-shadow:0 0 6px var(--green-accent); flex-shrink:0; animation:pillDotPulse 1.6s ease-in-out infinite; }
+        @keyframes pillDotPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .participant-pill-name { font-family:'Orbitron',sans-serif; font-size:0.72rem; color:var(--text-light); letter-spacing:1px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .participant-pill-logout { font-family:'Orbitron',sans-serif; font-size:0.65rem; color:var(--crimson-red); background:transparent; border:1px solid rgba(255,30,67,0.4); border-radius:20px; padding:3px 10px; cursor:pointer; letter-spacing:1px; transition:background 0.15s,color 0.15s; white-space:nowrap; }
+        .participant-pill-logout:hover { background:var(--crimson-red); color:#fff; }
         .container { max-width:860px; margin:30px auto; padding:20px; display:flex; flex-direction:column; gap:22px; }
         /* Timer */
         .timer-box { display:flex; align-items:center; justify-content:space-between; background:rgba(13,27,42,0.9); border:2px solid var(--cyan-accent); border-radius:8px; padding:15px 25px; box-shadow:0 0 12px rgba(0,240,255,0.3); }
@@ -54,7 +61,15 @@
     <canvas id="space-bg"></canvas>
     <header>
         <div class="org-branding">ST. JOSEPH'S COLLEGE OF ENG. &amp; TECH. | <span>ASTRA 11.0</span></div>
-        <div class="org-branding">FIZZBUZZ SUBMISSION</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <!-- Participant session pill — visible when logged in -->
+            <div class="participant-pill" id="participant-pill">
+                <span class="participant-pill-dot"></span>
+                <span class="participant-pill-name" id="participant-pill-name"></span>
+                <button class="participant-pill-logout" onclick="participantLogout()">LOGOUT</button>
+            </div>
+            <div class="org-branding">FIZZBUZZ SUBMISSION</div>
+        </div>
     </header>
 
     <div class="container">
@@ -378,6 +393,50 @@
             }
         }
 
+        // ── Participant session pill ──────────────────────────────────────────
+        var PARTICIPANT_LS_KEYS = [
+            'participant_id', 'participant_name', 'participant_role',
+            'imposterTeamCode', 'imposterTeamName', 'imposterParticipant',
+            'fizzbuzz_participant_cache', 'fizzbuzz_group',
+            'main_event_assignment_cache'
+        ];
+
+        function initParticipantPill() {
+            var pill   = document.getElementById('participant-pill');
+            var nameEl = document.getElementById('participant-pill-name');
+            if (!pill || !nameEl) return;
+
+            var savedName = localStorage.getItem('participant_name');
+            if (!savedName) {
+                try {
+                    var raw = localStorage.getItem('imposterParticipant');
+                    if (raw) { var p = JSON.parse(raw); savedName = p.name || p.participant_name || null; }
+                } catch(e) {}
+            }
+            // Also try the fizzbuzz cache
+            if (!savedName) {
+                try {
+                    var fc = JSON.parse(localStorage.getItem('fizzbuzz_participant_cache') || '{}');
+                    savedName = fc.name || null;
+                } catch(e) {}
+            }
+
+            if (savedName) {
+                nameEl.textContent = savedName;
+                pill.style.display = 'flex';
+            }
+        }
+
+        function participantLogout() {
+            if (!confirm('Log out of this participant session?\n\nYou will be returned to the homepage.')) return;
+            PARTICIPANT_LS_KEYS.forEach(function(k) {
+                localStorage.removeItem(k);
+                sessionStorage.removeItem(k);
+            });
+            window.location.href = 'homepage.html';
+        }
+
+        initParticipantPill();
         loadPage();
     </script>
 </body>
