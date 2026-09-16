@@ -2405,6 +2405,98 @@ if (!process.env.VERCEL) {
   app.use(express.static(FRONTEND_DIR));
 }
 
+// ── POST /api/admin/reset-event-data ─────────────────────────────────────────
+// Wipes all participant/submission/score data exactly like migration 011.
+// Preserves schema, tasks, criteria, game_config, timers, and shuffle_lock.
+// Requires admin auth + explicit confirmation payload to prevent accidents.
+
+app.post('/api/admin/reset-event-data', requireAdmin, async (req, res) => {
+  try {
+    const { confirm } = req.body || {};
+    if (confirm !== 'RESET_ALL_EVENT_DATA') {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing confirmation. Send { confirm: "RESET_ALL_EVENT_DATA" }.'
+      });
+    }
+
+    const errors = [];
+
+    // Helper: delete all rows from a table, log any error but keep going
+    async function wipe(table) {
+      const { error } = await supabase.from(table).delete().not('id', 'is', null);
+      if (error) errors.push(`${table}: ${error.message}`);
+    }
+    // For tables whose PK is not 'id'
+    async function wipeByPk(table, pkCol) {
+      const { error } = await supabase.from(table).delete().not(pkCol, 'is', null);
+      if (error) errors.push(`${table}: ${error.message}`);
+    }
+
+    // 1. Wipe data tables (children → parents)
+    await wipe('audit_log');
+    await wipe('admin_sessions');
+    await wipe('score_events');
+    await wipe('evaluations');
+    await wipe('competitive_evaluation_pairs');
+    await wipe('code_imposter_submissions');
+    await wipeByPk('fizzbuzz_submissions_v2', 'shuffled_group');
+    await wipeByPk('manual_event_scores_v2',  'original_team');
+    await wipe('main_event_assignments');
+
+    // participants — PK is UUID 'id'
+    const { error: pErr } = await supabase.from('participants').delete().not('id', 'is', null);
+    if (pErr) errors.push(`participants: ${pErr.message}`);
+
+    // teams — PK is SERIAL 'id'
+    const { error: tErr } = await supabase.from('teams').delete().not('id', 'is', null);
+    if (tErr) errors.push(`teams: ${tErr.message}`);
+
+    // 2. Reset state tables
+    await supabase.from('shuffle_lock')
+      .update({ is_locked: false, locked_at: null, locked_by: null })
+      .eq('id', 1);
+
+    await supabase.from('event_state')
+      .update({ status: 'READY', updated_at: new Date().toISOString() })
+      .eq('id', 1);
+
+    await supabase.from('event_timers')
+      .update({ started_at: null, paused_at: null, ends_at: null, status: 'idle', updated_at: new Date().toISOString() })
+      .in('event_key', ['main_event', 'fizzbuzz', 'code_imposter', 'sherlock']);
+
+    // Update remaining_seconds from duration_minutes on each row individually
+    const { data: timers } = await supabase.from('event_timers').select('event_key, duration_minutes');
+    for (const t of (timers || [])) {
+      await supabase.from('event_timers')
+        .update({ remaining_seconds: t.duration_minutes * 60, duration_seconds: t.duration_minutes * 60 })
+        .eq('event_key', t.event_key);
+    }
+
+    await supabase.from('game_config')
+      .update({ scoring_locked: false, updated_at: new Date().toISOString() })
+      .in('game_id', ['main_event', 'fizzbuzz']);
+
+    // Re-insert admin session for current user so they stay logged in after reset
+    const newToken = crypto.randomBytes(32).toString('hex');
+    await supabase.from('admin_sessions').insert({
+      token: newToken,
+      expires_at: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
+    });
+
+    auditLog('reset_event_data', 'all', { errors: errors.length ? errors : null }, 'admin');
+
+    return res.json({
+      success: true,
+      message: 'All event data wiped. Database is ready for a fresh start.',
+      new_token: newToken,
+      errors: errors.length ? errors : null
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.use((req, res) => {
   res.status(404).json({ success: false, message: `Route not found: ${req.method} ${req.path}` });
 });
