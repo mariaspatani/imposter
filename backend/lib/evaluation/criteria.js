@@ -44,7 +44,6 @@ function validateCriteriaScores(parsed, criteria) {
       // 'logic' was removed from the rubric — always 0.
       // Other criteria: if AI omits a key despite instructions, default 0 and log.
       if (c.criterion_key !== 'logic') {
-        console.warn(`[criteria] AI response missing criterion "${c.criterion_key}" — defaulting to 0`);
       }
       raw = 0;
     }

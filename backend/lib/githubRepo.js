@@ -132,7 +132,6 @@ async function validateRepository(repoUrl) {
       return { valid: false, message: 'Repository not found. Check the URL and ensure it is public.' };
     }
     if (err?.response?.status === 403 || err?.response?.status === 429) {
-      console.warn('[GitHub] Rate limited — assuming repo valid:', owner, repo);
       return { valid: true, owner, repo, defaultBranch: 'main' };
     }
     return { valid: false, message: 'Could not verify repository. Please check the URL.' };

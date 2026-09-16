@@ -257,6 +257,7 @@ CREATE TABLE IF NOT EXISTS manual_event_scores_v2 (
     code_imposter  INTEGER     NOT NULL DEFAULT 0,
     sherlock       INTEGER     NOT NULL DEFAULT 0,
     drawing        INTEGER     NOT NULL DEFAULT 0,
+    fizzbuzz       INTEGER     NOT NULL DEFAULT 0,
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

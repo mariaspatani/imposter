@@ -233,13 +233,11 @@ ${codeSnippet}
             if (promptCode.length > 8000) {
               promptCode = promptCode.slice(0, 8000) + '\n\n// [Further truncated due to token limits]';
             }
-            console.warn(`[Groq] Key …${currentKey.slice(-6)} rate-limited on model ${modelToUse}, rotating key…`);
             continue; // retry with next key
           }
 
           if (is404) {
             // Model not found — no point retrying this model with other keys
-            console.warn(`[Groq] Model ${modelToUse} not found (404), trying next model…`);
             break; // break key loop → outer model loop advances
           }
 
@@ -459,11 +457,9 @@ REQUIRED STRICT JSON OUTPUT:
 
           if (isRateOrPayload) {
             pool.markRateLimited(currentKey);
-            console.warn(`[Groq Pairwise] Key …${currentKey.slice(-6)} rate-limited on model ${modelToUse}, rotating key…`);
             continue;
           }
           if (is404) {
-            console.warn(`[Groq Pairwise] Model ${modelToUse} not found (404), trying next model…`);
             break;
           }
           throw err;

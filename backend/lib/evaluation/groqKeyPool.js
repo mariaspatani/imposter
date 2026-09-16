@@ -62,7 +62,6 @@ class GroqKeyPool {
   markRateLimited(key, overrideMs) {
     const dur = overrideMs !== undefined ? overrideMs : this._cooldownMs;
     this._cooldownUntil.set(key, Date.now() + dur);
-    console.warn(`[GroqKeyPool] Key ...${key.slice(-6)} is rate-limited — cooling for ${dur / 1000}s`);
   }
 
   /**
@@ -165,9 +164,6 @@ function getKeyPool() {
       'Set GROQ_API_KEY or GROQ_API_KEY_1…GROQ_API_KEY_10 in your .env file.'
     );
   }
-
-  console.log(`[GroqKeyPool] Initialised with ${allKeys.length} key(s) ` +
-    `(suffixes: ${allKeys.map(k => '...' + k.slice(-6)).join(', ')})`);
 
   _instance = new GroqKeyPool(allKeys);
   return _instance;

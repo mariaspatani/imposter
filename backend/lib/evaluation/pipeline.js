@@ -14,7 +14,6 @@ function logEvent(name, details) {
     event: name,
     details: typeof details === 'string' ? details : details
   };
-  console.log(`[${timestamp}] [${name}]`, JSON.stringify(logEntry.details));
 }
 
 async function loadCriteria(supabase, gameId = 'main_event') {
@@ -42,7 +41,6 @@ async function upsertEvaluationRow(supabase, participantId, patch) {
       updated_at: new Date().toISOString(),
     }, { onConflict: 'participant_id,game_id' });
   } catch (err) {
-    console.warn('[Pipeline] Failed to upsert evaluation row:', err.message);
   }
 }
 
@@ -126,7 +124,6 @@ async function processEvaluation(supabase, participantId, options = {}) {
         duration_ms: runtimeEvidence.runtime_duration_ms
       });
     } catch (runtimeErr) {
-      console.warn('[Runtime] Runtime evaluation failed, falling back to static-only:', runtimeErr.message);
       runtimeEvidence = {
         runtime_available: false,
         runtime_mode: 'FAILED',
@@ -202,7 +199,6 @@ async function processEvaluation(supabase, participantId, options = {}) {
         idempotencyKey: `main_event:${participantId}:INDIVIDUAL_SCORE`,
       });
     } catch (scoreErr) {
-      console.error('[SCORE_CREATED] ledger write failed (assignment already updated):', scoreErr.message);
     }
 
     logEvent('EVALUATION_COMPLETED', { participantId, total: result.total, max: result.maxTotal });

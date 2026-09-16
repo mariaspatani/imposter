@@ -23,9 +23,7 @@ class RuntimeEvaluator {
     
     // Try to initialize Puppeteer only if runtime is enabled
     if (RUNTIME_ENABLED) {
-      this._initializePuppeteer().catch(() => {
-        console.warn('[Runtime] Puppeteer initialization failed - runtime evaluation unavailable');
-      });
+      this._initializePuppeteer().catch(() => {});
     }
   }
 
@@ -35,10 +33,8 @@ class RuntimeEvaluator {
       const puppeteer = require('puppeteer');
       this.puppeteer = puppeteer;
       this.available = true;
-      console.log('[Runtime] Puppeteer initialized successfully');
     } catch (err) {
       this.available = false;
-      console.warn('[Runtime] Puppeteer not available:', err.message);
     }
   }
 
@@ -103,8 +99,6 @@ class RuntimeEvaluator {
       };
 
     } catch (err) {
-      console.error('[Runtime] Evaluation failed:', err.message);
-      
       return {
         runtime_available: true,
         runtime_mode: 'FAILED',
@@ -125,7 +119,6 @@ class RuntimeEvaluator {
         try {
           fs.rmSync(workspaceDir, { recursive: true, force: true });
         } catch (cleanupErr) {
-          console.warn('[Runtime] Workspace cleanup failed:', cleanupErr.message);
         }
       }
     }
@@ -147,18 +140,13 @@ class RuntimeEvaluator {
     const startTime = Date.now();
     
     // Step 1: Download and extract repository
-    console.log('[Runtime] Downloading repository for participant:', safeAssignment.participant_id);
     const repoPath = await this._downloadRepository(githubRepo, workspaceDir);
     
     // Step 2: Detect project type
-    console.log('[Runtime] Detecting project type...');
     const projectType = await this._detectProjectType(repoPath);
-    console.log('[Runtime] Project type detected:', projectType);
     
     // Step 3: Start development server
-    console.log('[Runtime] Starting development server...');
     const serverInfo = await this._startDevServer(repoPath, projectType);
-    console.log('[Runtime] Server started on port:', serverInfo.port);
     
     // Step 4: Launch browser
     const browser = await this.puppeteer.launch({
@@ -193,12 +181,10 @@ class RuntimeEvaluator {
 
     // Step 5: Navigate to application
     const appUrl = `http://localhost:${serverInfo.port}`;
-    console.log('[Runtime] Navigating to:', appUrl);
     
     try {
       await page.goto(appUrl, { waitUntil: 'networkidle2', timeout: 15000 });
     } catch (navErr) {
-      console.warn('[Runtime] Navigation timeout or error:', navErr.message);
       // Continue anyway - we might still get partial results
     }
 
@@ -206,7 +192,6 @@ class RuntimeEvaluator {
     const pageLoaded = consoleErrors.length === 0 || !consoleErrors.some(e => e.includes('Failed to load'));
 
     // Step 6: Run task-specific tests
-    console.log('[Runtime] Running task-specific tests for task:', safeAssignment.task_number);
     const testResults = await this._runTaskSpecificTests(page, safeAssignment.task_number);
     
     // Step 7: Capture screenshot
@@ -214,13 +199,11 @@ class RuntimeEvaluator {
     try {
       screenshot = await page.screenshot({ encoding: 'base64', fullPage: false });
     } catch (screenshotErr) {
-      console.warn('[Runtime] Screenshot capture failed:', screenshotErr.message);
     }
 
     // Step 8: Cleanup server
     if (serverInfo.kill) {
       serverInfo.kill();
-      console.log('[Runtime] Development server stopped');
     }
 
     await browser.close();
@@ -271,7 +254,6 @@ class RuntimeEvaluator {
         zipBuffer = Buffer.from(response.data);
         break;
       } catch (err) {
-        console.warn('[Runtime] Failed to download from', url, ':', err.message);
       }
     }
 
@@ -314,7 +296,6 @@ class RuntimeEvaluator {
           return 'node';
         }
       } catch (e) {
-        console.warn('[Runtime] Failed to parse package.json:', e.message);
       }
     }
 
@@ -346,7 +327,6 @@ class RuntimeEvaluator {
     try {
       switch (projectType) {
         case 'vite':
-          console.log('[Runtime] Starting Vite dev server...');
           serverProcess = spawn('npm', ['run', 'dev', '--', '--port', port.toString()], {
             cwd: repoPath,
             stdio: 'pipe',
@@ -355,7 +335,6 @@ class RuntimeEvaluator {
           break;
 
         case 'node':
-          console.log('[Runtime] Starting Node dev server...');
           // Try common dev scripts
           const packageJsonPath = path.join(repoPath, 'package.json');
           if (fs.existsSync(packageJsonPath)) {
@@ -375,7 +354,6 @@ class RuntimeEvaluator {
           break;
 
         case 'html':
-          console.log('[Runtime] Starting simple HTTP server for HTML...');
           // Use Python's built-in HTTP server
           serverProcess = spawn('python', ['-m', 'http.server', port.toString()], {
             cwd: repoPath,
@@ -399,7 +377,6 @@ class RuntimeEvaluator {
 
         serverProcess.stdout.on('data', (data) => {
           const output = data.toString();
-          console.log('[Runtime Server]', output);
           if (output.includes('ready') || output.includes('listening') || output.includes('Local:') || output.includes('localhost')) {
             clearTimeout(startupTimeout);
             ready = true;
@@ -408,7 +385,6 @@ class RuntimeEvaluator {
         });
 
         serverProcess.stderr.on('data', (data) => {
-          console.error('[Runtime Server Error]', data.toString());
         });
 
         serverProcess.on('error', (err) => {
@@ -435,7 +411,6 @@ class RuntimeEvaluator {
       });
 
       await readyPromise;
-      console.log('[Runtime] Server is ready on port', port);
 
       return {
         port,
@@ -459,7 +434,6 @@ class RuntimeEvaluator {
       if (startupTimeout) {
         clearTimeout(startupTimeout);
       }
-      console.error('[Runtime] Failed to start server:', err.message);
       throw err;
     }
   }
@@ -540,7 +514,6 @@ class RuntimeEvaluator {
       await this._testResponsiveDesign(page, responsiveTests);
 
     } catch (testErr) {
-      console.error('[Runtime] Task-specific tests failed:', testErr.message);
       domAssertions.push({
         test: 'test_execution',
         expected: 'completed',

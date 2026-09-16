@@ -55,15 +55,9 @@ const {
 // ── Startup validation ────────────────────────────────────────────────────────
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
-  console.error('[FATAL] SUPABASE_URL and SUPABASE_KEY (or SUPABASE_SERVICE_ROLE_KEY) are required.');
-  console.error('[FATAL]   Check Vercel Project Settings → Environment Variables.');
   if (!process.env.VERCEL) process.exit(1);
-  // On Vercel, let the first request also surface the error via 500 instead of silent cold-start crash
 }
 
-if (!process.env.ADMIN_SECRET) {
-  console.warn('[WARN] ADMIN_SECRET is not set. Admin login will be disabled.');
-}
 
 // ── Supabase client ───────────────────────────────────────────────────────────
 
@@ -89,13 +83,6 @@ async function checkRequiredTables() {
     if (error && (error.message.includes('does not exist') || error.message.includes('schema cache'))) {
       missing.push(t);
     }
-  }
-  if (missing.length > 0) {
-    console.error('[DB] ⚠ MISSING TABLES:', missing.join(', '));
-    console.error('[DB] Run backend/migrations/002_missing_tables.sql in Supabase SQL Editor to create them.');
-    console.error('[DB] Admin login will fail until admin_sessions is created.');
-  } else {
-    console.log('[DB] All required tables exist ✓');
   }
   return missing;
 }
@@ -384,7 +371,6 @@ app.post('/api/authenticate', authLimiter, async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('[authenticate]', err.message);
     return res.status(500).json({ success: false, message: 'Authentication failed.' });
   }
 });
@@ -451,7 +437,6 @@ app.get('/api/my-assignment/:participantId', async (req, res) => {
 
     return res.json({ success: true, assignment: data });
   } catch (err) {
-    console.error('[my-assignment]', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch assignment.' });
   }
 });
@@ -498,10 +483,8 @@ app.post('/api/admin/toggle-submissions', requireAdmin, async (req, res) => {
     }, { onConflict: 'game_id' });
 
     auditLog('toggle_submissions', 'main_event', { submissions_open: newOpen });
-    console.log('[submissions-toggle] submissions_open set to', newOpen);
     return res.json({ success: true, submissions_open: newOpen });
   } catch (err) {
-    console.error('[toggle-submissions]', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -601,12 +584,10 @@ app.post('/api/submit-github', submitLimiter, async (req, res) => {
       role_name:        existing.role_name,
       work_description: existing.work_description,
       is_imposter:      existing.is_imposter
-    }).catch(err => {
-      console.error('[eval-background] Unhandled error for', participant_id, ':', err.message);
+    }).catch(() => {
     });
 
   } catch (err) {
-    console.error('[submit-github]', err.message);
     return res.status(500).json({ success: false, message: 'Submission failed. Please try again.' });
   }
 });
@@ -623,11 +604,8 @@ async function runEvaluation(participantId, assignmentData, options = {}) {
       force: options.force !== undefined ? options.force : false
     });
 
-    console.log('[eval] Completed for', participantId, '— success:', result.success, 'state:', result.evaluation_state);
   } catch (evalErr) {
-    console.error('[eval] Failed for', participantId, ':', evalErr.message);
 
-    // Preserve submission — only mark evaluation as failed
     try {
       await supabase.from('main_event_assignments').update({
         evaluation_status: 'Failed',
@@ -635,10 +613,6 @@ async function runEvaluation(participantId, assignmentData, options = {}) {
       }).eq('participant_id', participantId);
     } catch (_) {}
   } finally {
-    // Auto-start the pairwise competitive evaluation once BOTH candidates in
-    // the pair have submitted.  Runs after the individual eval so competitive
-    // scores are authoritative (never overwritten by a late individual eval)
-    // and so existing runtime evidence from the evaluations table is reused.
     try {
       const auto = await autoEvaluatePairsForParticipant(supabase, participantId, {
         retry: options.retry === true,
@@ -646,11 +620,9 @@ async function runEvaluation(participantId, assignmentData, options = {}) {
       });
       for (const a of auto) {
         if (a.result?.status === 'EVALUATED') {
-          console.log('[pair-auto-eval] Pair', a.pair_id, '(', a.role_name, ') auto-evaluated after both submissions landed.');
         }
       }
     } catch (err) {
-      console.error('[pair-auto-eval] Unhandled error for', participantId, ':', err.message);
     }
   }
 }
@@ -781,7 +753,6 @@ app.post('/api/fizzbuzz/submit-v2', submitLimiter, async (req, res) => {
       if (isDupe) {
         return res.status(409).json({ success: false, message: 'Another member of your group already submitted.' });
       }
-      console.error('[fizzbuzz-submit]', insErr.message);
       return res.status(500).json({ success: false, message: 'Submission failed. Please try again.' });
     }
 
@@ -854,9 +825,6 @@ app.post('/api/code-imposter/submit', submitLimiter, async (req, res) => {
         original_team  = asgn.original_team;
       }
     } else {
-      // Fallback: look up by name (best-effort for coordinator-run events)
-      // Log a warning so coordinators can identify missing participant_id cases.
-      console.warn('[code-imposter] participant_id missing, falling back to name lookup for:', participant_name);
       const { data: asgn } = await supabase
         .from('main_event_assignments')
         .select('participant_id, original_team')
@@ -1043,7 +1011,6 @@ app.post('/api/register-team', registerLimiter, requireAdmin, async (req, res) =
     auditLog('register_team', team_name, { team_code: teamCode, members });
     return res.status(201).json({ success: true, team_code: teamCode, message: 'Team registered successfully.' });
   } catch (err) {
-    console.error('[register-team]', err.message);
     return res.status(500).json({ success: false, message: 'Team registration failed.' });
   }
 });
@@ -1345,7 +1312,6 @@ app.post('/api/start-shuffle', requireAdmin, async (req, res) => {
     return res.json({ success: true, imposters_selected: N, groups_created: N, assignments_written: true, assignments_count: rows.length });
 
   } catch (err) {
-    console.error('[start-shuffle]', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1402,8 +1368,6 @@ app.get('/api/admin/team-scores', requireAdmin, async (req, res) => {
       .select('*');
 
     if (scoreErr) {
-      console.error('[team-scores] Falling back to assignments due to score_events error:', scoreErr.message);
-      // Fallback to assignment-based calculation
       const [assignRes, manualRes] = await Promise.all([
         supabase.from('main_event_assignments').select('original_team, main_event_score, fizzbuzz_score, ai_score, original_team_id'),
         supabase.from('manual_event_scores_v2').select('*')
@@ -1469,7 +1433,7 @@ const getPodiumData = async (req, res) => {
     (manualRes.data || []).forEach(r => {
       const t = r.original_team;
       if (!teamMap[t]) teamMap[t] = { team: t, main_event_total: 0, fizzbuzz_total: 0, manual_total: 0, members_scored: 0 };
-      teamMap[t].manual_total += Number(r.code_imposter || 0) + Number(r.sherlock || 0) + Number(r.drawing || 0);
+      teamMap[t].manual_total += Number(r.code_imposter || 0) + Number(r.sherlock || 0) + Number(r.drawing || 0) + Number(r.fizzbuzz || 0);
     });
 
     const podium = Object.values(teamMap).map(t => ({
@@ -1543,12 +1507,23 @@ app.get('/api/admin/manual-scores', requireAdmin, async (req, res) => {
 // ── GET /api/admin/fizzbuzz-scores ────────────────────────────────────────────
 app.get('/api/admin/fizzbuzz-scores', requireAdmin, async (req, res) => {
   try {
+    let fizzbuzzColExists = true;
+    try {
+      const { error: colCheckErr } = await supabase
+        .from('manual_event_scores_v2')
+        .select('fizzbuzz')
+        .limit(1);
+      if (colCheckErr) fizzbuzzColExists = false;
+    } catch (_) {
+      fizzbuzzColExists = false;
+    }
+    const scoreCol = fizzbuzzColExists ? 'fizzbuzz' : 'code_imposter';
     const { data, error } = await supabase
-      .from('manual_event_scores')
-      .select('original_team, marks')
-      .eq('event_name', 'FizzBuzz');
+      .from('manual_event_scores_v2')
+      .select(`original_team, ${scoreCol}`);
     if (error) return res.status(500).json({ success: false, message: error.message });
-    return res.json({ success: true, scores: data || [] });
+    const scores = (data || []).map(r => ({ original_team: r.original_team, marks: r[scoreCol] }));
+    return res.json({ success: true, scores });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1562,18 +1537,22 @@ app.post('/api/admin/save-fizzbuzz-score', requireAdmin, async (req, res) => {
     }
     const safeMarks = Math.min(100, Math.max(0, marks));
     const now = new Date().toISOString();
-    const { data: ex } = await supabase.from('manual_event_scores')
-      .select('id').eq('event_name', 'FizzBuzz').eq('original_team', original_team).maybeSingle();
-    let error;
-    if (ex) {
-      ({ error } = await supabase.from('manual_event_scores')
-        .update({ marks: safeMarks, updated_at: now })
-        .eq('event_name', 'FizzBuzz').eq('original_team', original_team));
-    } else {
-      ({ error } = await supabase.from('manual_event_scores')
-        .insert({ event_name: 'FizzBuzz', original_team, marks: safeMarks, updated_at: now }));
+    let fizzbuzzColExists = true;
+    try {
+      const { error: colCheckErr } = await supabase
+        .from('manual_event_scores_v2')
+        .select('fizzbuzz')
+        .limit(1);
+      if (colCheckErr) fizzbuzzColExists = false;
+    } catch (_) {
+      fizzbuzzColExists = false;
     }
-    if (error) { console.error('[fizzbuzz-score]', error); return res.status(500).json({ success: false, message: error.message }); }
+    const scoreCol = fizzbuzzColExists ? 'fizzbuzz' : 'code_imposter';
+    const { error } = await supabase.from('manual_event_scores_v2').upsert(
+      { original_team, [scoreCol]: safeMarks, updated_at: now },
+      { onConflict: 'original_team' }
+    );
+    if (error) { return res.status(500).json({ success: false, message: error.message }); }
     return res.json({ success: true, marks: safeMarks });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1598,7 +1577,7 @@ app.post('/api/admin/save-fizzbuzz-group-score', requireAdmin, async (req, res) 
       .select('participant_id, is_imposter, participant_name, original_team')
       .eq('shuffled_group', shuffled_group);
 
-    if (fetchErr) { console.error('[fizzbuzz-group-score fetch]', fetchErr); return res.status(500).json({ success: false, message: fetchErr.message }); }
+    if (fetchErr) { return res.status(500).json({ success: false, message: fetchErr.message }); }
     if (!members || members.length === 0) return res.status(404).json({ success: false, message: 'No members found for: ' + shuffled_group });
 
     const updated = [];
@@ -1609,13 +1588,13 @@ app.post('/api/admin/save-fizzbuzz-group-score', requireAdmin, async (req, res) 
         .from('main_event_assignments')
         .update({ fizzbuzz_score: memberScore })
         .eq('participant_id', m.participant_id);
-      if (updErr) { console.error('[fizzbuzz-group-score update]', m.participant_id, updErr.message); }
+      if (updErr) {  }
       else { updated.push({ participant_id: m.participant_id, name: m.participant_name, original_team: m.original_team, score: memberScore }); }
     }
 
     auditLog('fizzbuzz_group_score', shuffled_group, { group_score: safeScore, imposter_bonus });
     return res.json({ success: true, shuffled_group, group_score: safeScore, imposter_bonus, updated });
-  } catch (err) { console.error('[fizzbuzz-group-score]', err.message); return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ── GET /api/admin/main-event-scores ─────────────────────────────────────────
@@ -1640,7 +1619,7 @@ app.post('/api/admin/save-main-event-score', requireAdmin, async (req, res) => {
     const { error } = await supabase.from('main_event_assignments')
       .update({ ai_score: safeScore, main_event_score: safeScore })
       .eq('participant_id', participant_id);
-    if (error) { console.error('[main-event-score]', error); return res.status(500).json({ success: false, message: error.message }); }
+    if (error) { return res.status(500).json({ success: false, message: error.message }); }
     return res.json({ success: true, score: safeScore });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1688,7 +1667,7 @@ app.post('/api/evaluate-submission/:participantId', requireAdmin, evalLimiter, a
       role_name:        asgn.role_name,
       work_description: asgn.work_description,
       is_imposter:      asgn.is_imposter
-    }, { retry: true, force: true }).catch(err => console.error('[re-eval]', participantId, err.message));
+    }, { retry: true, force: true }).catch(() => {});
 
     auditLog('re_evaluate', participantId, { participant: asgn.participant_name });
   } catch (err) {
@@ -1888,11 +1867,8 @@ app.post('/api/admin/fizzbuzz/run-code', requireAdmin, async (req, res) => {
     try {
       groqKey = _getPool().next();
     } catch (poolErr) {
-      console.error('[run-code] Key pool error:', poolErr.message);
       return res.json({ success: false, message: poolErr.message, error: poolErr.message });
     }
-
-    console.log(`[run-code] Using pooled key. Language: ${language}, Code length: ${code.length}`);
 
     const prompt = `Language name: ${language}
 Source code:
@@ -1915,18 +1891,14 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
             signal: AbortSignal.timeout(15000)
         });
     } catch (e) {
-        console.error('[run-code] Fetch error:', e.message);
         return res.json({ success: false, message: `Groq fetch failed: ${e.message}`, error: `Groq fetch failed: ${e.message}` });
     }
-
-    console.log(`[run-code] Groq response status: ${groqResponse.status}`);
 
     if (!groqResponse.ok) {
         const errText = await groqResponse.text().catch(() => 'No text returned');
         if (groqResponse.status === 429 || groqResponse.status === 413) {
           try { _getPool().markRateLimited(groqKey); } catch (_) {}
         }
-        console.error(`[run-code] Groq API Error: ${groqResponse.status} - ${errText}`);
         return res.json({ success: false, message: `Groq API Error: ${groqResponse.status} - ${errText}`, error: `Groq API Error: ${groqResponse.status} - ${errText}` });
     }
 
@@ -1937,7 +1909,6 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
         output = (groqData.choices?.[0]?.message?.content || '').trim();
         try { _getPool().markSuccess(groqKey); } catch (_) {}
     } catch (e) {
-        console.error('[run-code] Malformed response from Groq:', e.message);
         return res.json({ success: false, message: "Malformed response from Groq.", error: "Malformed response from Groq." });
     }
 
@@ -1957,7 +1928,6 @@ Execute mentally. Produce exactly the console output. If compilation/runtime err
         exit_code: isError ? 1 : 0
     });
   } catch (err) {
-    console.error('[run-code]', err.message);
     return res.status(500).json({ success: false, message: err.message, error: err.message });
   }
 });
@@ -2030,7 +2000,6 @@ async function applyFizzBuzzScore(req, res) {
           idempotencyKey: `fizzbuzz:${score.participantId}:INDIVIDUAL_SCORE`
         });
       } catch (scoreErr) {
-        console.error('[SCORE_CREATED] ledger write failed for FizzBuzz:', scoreErr.message);
       }
     }
 
@@ -2290,7 +2259,7 @@ app.post('/api/admin/recover-evaluations', requireAdmin, async (req, res) => {
         role_name:        row.role_name,
         work_description: row.work_description,
         is_imposter:      row.is_imposter
-      }, { retry: true, force: true }).catch(err => console.error('[recover-eval]', row.participant_id, err.message));
+      }, { retry: true, force: true }).catch(() => {});
     }
 
     auditLog('recover_evaluations', 'system', { count: candidates.length });
@@ -2448,12 +2417,10 @@ app.use((req, res) => {
 
 app.use((err, req, res, _next) => {
   const stack = (err && err.stack) ? err.stack : String(err);
-  console.error('[server error]', stack);
   if (!res.headersSent) {
     return res.status(500).json({
       success: false,
       message: (err && err.message) ? err.message : 'Internal server error.',
-      // If in development or explicitly requested, include stack
       ...((!process.env.NODE_ENV || process.env.NODE_ENV !== 'production')
         ? { _stack: stack.split('\n').slice(0, 8).join('\n') }
         : {})
@@ -2468,8 +2435,6 @@ app.use((err, req, res, _next) => {
 if (!process.env.VERCEL) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
-    console.log(`[ASTHRA Imposter] Server running on port ${PORT}`);
-    console.log(`[ASTHRA Imposter] Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
   });
 }
 
