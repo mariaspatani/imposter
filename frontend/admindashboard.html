@@ -13,12 +13,12 @@
 <body class="bg-darkblack text-gray-100 font-rajdhani flex h-screen overflow-hidden">
 
 <!-- ── Sidebar ── -->
-<aside class="w-72 bg-charcoal border-r border-bordergray flex flex-col z-20 flex-shrink-0">
-    <div class="p-6 border-b border-bordergray">
+<aside class="w-72 bg-charcoal border-r border-bordergray flex flex-col z-20 flex-shrink-0 min-h-0">
+    <div class="p-6 border-b border-bordergray flex-shrink-0">
         <h1 class="text-lg font-orbitron font-bold tracking-wider text-crimson-500">ASTHRA 11.0</h1>
         <p class="text-xs text-gray-400 mt-1 font-orbitron">Master Admin Control</p>
     </div>
-    <nav class="flex-1 p-4 space-y-1.5 overflow-y-auto font-orbitron text-xs">
+    <nav class="flex-1 p-4 space-y-1.5 overflow-y-auto font-orbitron text-xs min-h-0">
         <button onclick="switchTab('overview')"     id="nav-overview"     class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-crimson-600 text-white shadow-lg shadow-crimson-600/30 transition-all">📊 Overview</button>
         <button onclick="switchTab('participants')" id="nav-participants" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">👥 Participants</button>
         <button onclick="switchTab('timers')"       id="nav-timers"       class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">⏱️ Event Timers</button>
@@ -29,11 +29,12 @@
         <button onclick="switchTab('flow')"         id="nav-flow"         class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">👁️ Event Flow</button>
         <button onclick="switchTab('pairwise')"     id="nav-pairwise"     class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-cardgray hover:text-gray-200 transition-all">⚔️ Pairwise (12 Pairs)</button>
     </nav>
-    <div class="p-4 border-t border-bordergray bg-black/50 text-xs font-orbitron space-y-2">
+    <div class="p-4 border-t border-bordergray bg-black/50 text-xs font-orbitron space-y-2 flex-shrink-0">
         <div class="flex items-center justify-between text-gray-400 mb-1">
             <span>Live Status</span><span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
         </div>
         <div id="sidebar-status" class="text-crimson-500 font-bold truncate">Loading...</div>
+        <button onclick="showResetModal()" class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-orange-900/30 text-orange-400 border border-orange-700/40 hover:bg-orange-700 hover:text-white transition-all text-[11px] font-orbitron tracking-wider mb-1">🗑️ Clear All Data</button>
         <button onclick="confirmLogout()" class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-rose-900/30 text-rose-400 border border-rose-700/40 hover:bg-rose-700 hover:text-white transition-all text-[11px] font-orbitron tracking-wider">🚪 Logout</button>
     </div>
 </aside>
@@ -352,6 +353,63 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- ── Clear All Data Modal ── -->
+<div id="reset-modal" class="fixed inset-0 bg-black/95 backdrop-blur-sm z-[998] hidden items-center justify-center p-4" style="display:none;">
+    <div class="bg-cardgray border border-orange-700/60 rounded-2xl max-w-md w-full p-8 shadow-2xl space-y-5">
+        <!-- Header -->
+        <div class="text-center space-y-2">
+            <div class="text-4xl">🗑️</div>
+            <h2 class="text-base font-orbitron font-bold text-orange-400 uppercase tracking-widest">Clear All Event Data</h2>
+            <p class="text-xs font-rajdhani text-gray-300 leading-relaxed">
+                This will permanently wipe <span class="text-white font-bold">all participant and event data</span> from the database.<br>
+                The system will return to a clean ready-to-use state.
+            </p>
+        </div>
+
+        <!-- What gets wiped -->
+        <div class="bg-black/50 border border-orange-900/50 rounded-xl p-4 space-y-1.5">
+            <p class="text-[10px] font-orbitron text-orange-400 uppercase tracking-widest mb-2">⚠️ Will be permanently deleted</p>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] font-rajdhani text-rose-300">
+                <span>✕ All teams</span>
+                <span>✕ All participants</span>
+                <span>✕ Shuffle assignments</span>
+                <span>✕ GitHub submissions</span>
+                <span>✕ AI evaluations</span>
+                <span>✕ All scores</span>
+                <span>✕ FizzBuzz records</span>
+                <span>✕ Code Imposter records</span>
+                <span>✕ Manual score entries</span>
+                <span>✕ Audit logs</span>
+            </div>
+        </div>
+
+        <!-- What is preserved -->
+        <div class="bg-black/30 border border-emerald-900/40 rounded-xl p-3 space-y-1">
+            <p class="text-[10px] font-orbitron text-emerald-500 uppercase tracking-widest mb-1">✓ Kept intact</p>
+            <p class="text-[11px] font-rajdhani text-gray-400">Event tasks · Scoring rubric · Game config · Timers (reset to idle) · All app functionality</p>
+        </div>
+
+        <!-- Confirmation input -->
+        <div class="space-y-2">
+            <label class="text-[11px] font-orbitron text-gray-400 uppercase tracking-wider">Type <span class="text-orange-300 font-bold">CLEAR EVENT DATA</span> to confirm</label>
+            <input id="reset-confirm-input" type="text" placeholder="CLEAR EVENT DATA"
+                class="w-full bg-black border border-bordergray rounded-lg px-4 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-orange-500 placeholder-gray-600"
+                oninput="checkResetInput()" onpaste="setTimeout(checkResetInput,0)">
+        </div>
+
+        <!-- Actions -->
+        <div class="flex gap-3">
+            <button onclick="hideResetModal()" class="flex-1 text-sm font-orbitron px-4 py-3 rounded-xl bg-bordergray text-gray-300 hover:bg-zinc-700 transition-all">Cancel</button>
+            <button id="reset-confirm-btn" onclick="executeReset()" disabled
+                class="flex-1 text-sm font-orbitron px-4 py-3 rounded-xl bg-orange-900/40 text-orange-600 border border-orange-800/40 cursor-not-allowed transition-all"
+                style="pointer-events:none;">
+                🗑️ Clear All Data
+            </button>
+        </div>
+        <p class="text-[10px] font-orbitron text-gray-600 text-center">This action cannot be undone.</p>
+    </div>
 </div>
 
 <!-- ── Logout Confirmation Modal ── -->
@@ -1268,8 +1326,13 @@ function renderPodium(){
 // PART 6 — EVENT TIMERS
 // ══════════════════════════════════════════════════════════════════════════════
 function fmtSecs(s){
-    s = Math.max(0, Math.floor(s));
-    const m = Math.floor(s/60), sec = s%60;
+    s = Math.max(0, Math.floor(Number(s) || 0));
+    const h   = Math.floor(s / 3600);
+    const m   = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) {
+        return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+    }
     return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
 }
 
@@ -2196,6 +2259,71 @@ function applyShuffleLockUI(isLocked, lockedAt){
 
 // Auto-start if token already exists in session
 if (ADMIN_TOKEN) init();
+
+// ── Clear All Data Modal ──────────────────────────────────────────────────────
+function showResetModal() {
+    const m = document.getElementById('reset-modal');
+    const inp = document.getElementById('reset-confirm-input');
+    inp.value = '';
+    checkResetInput();
+    m.style.display = 'flex';
+    m.classList.remove('hidden');
+    setTimeout(() => inp.focus(), 80);
+}
+
+function hideResetModal() {
+    const m = document.getElementById('reset-modal');
+    m.style.display = 'none';
+    document.getElementById('reset-confirm-input').value = '';
+    checkResetInput();
+}
+
+function checkResetInput() {
+    const val = (document.getElementById('reset-confirm-input').value || '').trim();
+    const btn = document.getElementById('reset-confirm-btn');
+    const match = val === 'CLEAR EVENT DATA';
+    btn.disabled = !match;
+    if (match) {
+        btn.className = 'flex-1 text-sm font-orbitron px-4 py-3 rounded-xl bg-orange-700 text-white hover:bg-orange-600 transition-all cursor-pointer';
+        btn.style.pointerEvents = 'auto';
+    } else {
+        btn.className = 'flex-1 text-sm font-orbitron px-4 py-3 rounded-xl bg-orange-900/40 text-orange-600 border border-orange-800/40 cursor-not-allowed transition-all';
+        btn.style.pointerEvents = 'none';
+    }
+}
+
+async function executeReset() {
+    hideResetModal();
+
+    const sideBtn = document.querySelector('button[onclick="showResetModal()"]');
+    if (sideBtn) { sideBtn.disabled = true; sideBtn.innerText = '⏳ Clearing...'; }
+
+    try {
+        const r = await apiFetch(API + '/api/admin/reset-event-data', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ confirm: 'RESET_ALL_EVENT_DATA' })
+        });
+        const d = await r.json();
+
+        if (r.ok && d.success) {
+            // Server issued a new token (old sessions were wiped) — swap it in
+            if (d.new_token) {
+                ADMIN_TOKEN = d.new_token;
+                localStorage.setItem('admin_token', ADMIN_TOKEN);
+            }
+            // Show success then reload
+            alert('✅ All event data cleared.\n\nThe database is ready for a fresh start.\nTimers have been reset to idle.\n\nThe page will now reload.');
+            window.location.reload();
+        } else {
+            alert('❌ Clear failed: ' + (d.message || 'Unknown error'));
+            if (sideBtn) { sideBtn.disabled = false; sideBtn.innerText = '🗑️ Clear All Data'; }
+        }
+    } catch (ex) {
+        alert('❌ Network error: ' + ex.message);
+        if (sideBtn) { sideBtn.disabled = false; sideBtn.innerText = '🗑️ Clear All Data'; }
+    }
+}
 </script>
 </body>
 </html>
