@@ -10,6 +10,24 @@ if (!process.env.VERCEL) {
     require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 }
 
+// ── Env var aliasing / normalisation (Vercel-friendly) ───────────────────────
+// Users commonly set SUPABASE_SERVICE_ROLE_KEY on Vercel.  Accept both names,
+// preferring the service-role key when present (server-only, bypasses RLS).
+if (!process.env.SUPABASE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  process.env.SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+}
+// Also tolerate SUPABASE_ANON_KEY as a fallback
+if (!process.env.SUPABASE_KEY && process.env.SUPABASE_ANON_KEY) {
+  process.env.SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
+}
+// Expose a stable alias the auth middleware can read without its own parsing
+if (!process.env.__SUPABASE_URL_RESOLVED) {
+  process.env.__SUPABASE_URL_RESOLVED = process.env.SUPABASE_URL;
+}
+if (!process.env.__SUPABASE_KEY_RESOLVED) {
+  process.env.__SUPABASE_KEY_RESOLVED = process.env.SUPABASE_KEY;
+}
+
 const { createClient }    = require('@supabase/supabase-js');
 const { validateRepository } = require('./aiScorer');
 const { requireAdmin }    = require('./middleware/auth');
@@ -37,8 +55,10 @@ const {
 // ── Startup validation ────────────────────────────────────────────────────────
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
-  console.error('[FATAL] SUPABASE_URL and SUPABASE_KEY are required.');
-  process.exit(1);
+  console.error('[FATAL] SUPABASE_URL and SUPABASE_KEY (or SUPABASE_SERVICE_ROLE_KEY) are required.');
+  console.error('[FATAL]   Check Vercel Project Settings → Environment Variables.');
+  if (!process.env.VERCEL) process.exit(1);
+  // On Vercel, let the first request also surface the error via 500 instead of silent cold-start crash
 }
 
 if (!process.env.ADMIN_SECRET) {
@@ -47,7 +67,9 @@ if (!process.env.ADMIN_SECRET) {
 
 // ── Supabase client ───────────────────────────────────────────────────────────
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false }
+});
 
 // ── Startup table check (non-blocking, logs missing tables) ──────────────────
 // Runs after the first event-loop tick so the server is ready to handle /api/health
@@ -92,9 +114,10 @@ const app = express();
 // In production set FRONTEND_ORIGIN to your deployed URL.
 // In local dev every common port is allowed automatically so Live Server,
 // Vite, or any other static server works without touching .env.
-const ALLOWED_ORIGINS = (process.env.FRONTEND_ORIGIN || '')
+const FRONTEND_ORIGIN_RAW = (process.env.FRONTEND_ORIGIN || '').trim();
+const ALLOWED_ORIGINS = FRONTEND_ORIGIN_RAW
   .split(',')
-  .map(o => o.trim())
+  .map(o => o.trim().replace(/\/+$/, '')) // normalize: trim + strip trailing slashes
   .filter(Boolean);
 
 // Local dev origins always permitted (ignored in production if FRONTEND_ORIGIN is set)
@@ -111,20 +134,42 @@ const LOCAL_DEV_ORIGINS = [
   'http://127.0.0.1:8000',
 ];
 
+// Helpers
+function isVercelAppOrigin(origin) {
+  try {
+    const { hostname } = new URL(origin);
+    // Matches project.vercel.app, project-git-branch-user.vercel.app, project-*.vercel.app etc
+    return /\.vercel\.app$/i.test(hostname);
+  } catch { return false; }
+}
+function originsMatch(a, b) {
+  try {
+    const ua = new URL(a), ub = new URL(b);
+    return ua.protocol === ub.protocol
+        && ua.hostname === ub.hostname
+        && String(ua.port) === String(ub.port);
+  } catch { return false; }
+}
+
 app.use(cors({
   origin(origin, cb) {
-    // Same-origin requests (no Origin header — e.g. direct file:// or server-side)
+    // Same-origin requests (no Origin header — e.g. direct browser navigation or server-side)
     if (!origin) return cb(null, true);
-    // Explicitly listed production origins
-    if (ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    // Always allow local dev origins
-    if (LOCAL_DEV_ORIGINS.includes(origin)) return cb(null, true);
-    // If no FRONTEND_ORIGIN env var is set we are in local/dev mode — allow all
-    if (!process.env.FRONTEND_ORIGIN) return cb(null, true);
+    const normalizedOrigin = origin.trim().replace(/\/+$/, '');
+    // 1) Explicit FRONTEND_ORIGIN list (normalized comparison — protocol+host+port)
+    if (ALLOWED_ORIGINS.some(explicit => originsMatch(explicit, normalizedOrigin))) return cb(null, true);
+    // 2) Always allow any *.vercel.app origin (previews, branch deploys, production aliases)
+    if (isVercelAppOrigin(normalizedOrigin)) return cb(null, true);
+    // 3) Local dev origins (exact match after normalization)
+    if (LOCAL_DEV_ORIGINS.includes(normalizedOrigin)) return cb(null, true);
+    // 4) If user didn't configure FRONTEND_ORIGIN we are in local/dev mode — allow all
+    if (!FRONTEND_ORIGIN_RAW) return cb(null, true);
     return cb(new Error('CORS: origin not allowed: ' + origin));
   },
-  methods:     ['GET', 'POST', 'OPTIONS'],
-  credentials: true
+  methods:     ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  credentials: true,
+  maxAge: 86400
 }));
 
 app.use(express.json({ limit: '1mb' }));
@@ -194,12 +239,49 @@ function resolveEventKey(input) {
 
 app.get('/api/health', async (req, res) => {
   try {
-    const { error } = await supabase.from('teams').select('count').limit(1);
-    const missing = _missingTables; // may be null if startup check is still running
+    let dbStatus = 'ok', dbError = null, missing = _missingTables;
+
+    // 1) Run a lightweight supabase connectivity check even if client creation failed
+    try {
+      const { error } = await supabase.from('teams').select('count').limit(1);
+      if (error) {
+        dbStatus = 'query_failed';
+        dbError = error.message;
+      }
+    } catch (sbErr) {
+      dbStatus = 'unavailable';
+      dbError = (sbErr && sbErr.message) ? sbErr.message : String(sbErr);
+    }
+
+    // 2) Check supabase client init state from auth middleware
+    let authSbDiag = null;
+    try {
+      const { _getSupabaseDiagnostics } = require('./middleware/auth');
+      if (typeof _getSupabaseDiagnostics === 'function') {
+        authSbDiag = _getSupabaseDiagnostics();
+      }
+    } catch (_) { /* module not ready — ignore */ }
+
+    // 3) Critical env vars (no values, only present/absent — never leak secrets!)
+    const envChecks = {
+      SUPABASE_URL:    !!process.env.SUPABASE_URL,
+      SUPABASE_KEY:    !!(process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY),
+      ADMIN_SECRET:    !!process.env.ADMIN_SECRET,
+      GROQ_API_KEY:    !!(process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_1),
+      GITHUB_TOKEN:    !!process.env.GITHUB_TOKEN,
+      FRONTEND_ORIGIN: process.env.FRONTEND_ORIGIN ? process.env.FRONTEND_ORIGIN.split(',').length : 0,
+      VERCEL:          !!process.env.VERCEL,
+    };
+
+    const degraded = (dbStatus !== 'ok') || (authSbDiag && authSbDiag.ok === false) || !envChecks.SUPABASE_URL || !envChecks.SUPABASE_KEY;
+
     return res.json({
       success:         true,
-      status:          error ? 'degraded' : 'ok',
-      database:        error ? 'unavailable' : 'ok',
+      status:          degraded ? 'degraded' : 'ok',
+      database:        dbStatus,
+      database_error:  dbError,
+      supabase_auth_client: authSbDiag,
+      env:             envChecks,
       missing_tables:  missing && missing.length > 0 ? missing : undefined,
       setup_required:  missing && missing.length > 0
         ? 'Run backend/migrations/002_missing_tables.sql in Supabase SQL Editor'
@@ -207,8 +289,40 @@ app.get('/api/health', async (req, res) => {
       timestamp:       new Date().toISOString()
     });
   } catch (err) {
-    return res.status(500).json({ success: false, status: 'error', database: 'unavailable' });
+    return res.status(500).json({
+      success: false,
+      status: 'error',
+      database: 'unavailable',
+      message: (err && err.message) ? err.message : String(err)
+    });
   }
+});
+
+// ── GET /api/admin/sanity ────────────────────────────────────────────────────
+// Admin-only diagnostic. Hits the EXACT same paths that fetchAll() does so we can
+// isolate: is it requireAdmin, a specific DB table, or env vars?
+app.get('/api/admin/sanity', requireAdmin, async (req, res) => {
+  const checks = {};
+  const tests = [
+    ['participants',         'main_event_assignments',          'participant_id', 1],
+    ['team_scores_event',    'score_events',                    'id',             1],
+    ['team_scores_manual',   'manual_event_scores_v2',          'original_team',  1],
+    ['admin_sessions',       'admin_sessions',                  'token',          1],
+    ['fizzbuzz_submissions', 'fizzbuzz_submissions_v2',         'participant_id', 1],
+    ['timers',               'event_timers',                    'event_name',     1],
+  ];
+  for (const [name, table, col, lim] of tests) {
+    try {
+      const { error, data } = await supabase.from(table).select(col).limit(lim);
+      checks[name] = error
+        ? { ok: false, error: error.message }
+        : { ok: true, rows: (data || []).length };
+    } catch (e) {
+      checks[name] = { ok: false, error: (e && e.message) ? e.message : String(e) };
+    }
+  }
+  const allOk = Object.values(checks).every(c => c.ok);
+  return res.json({ success: true, ok: allOk, checks });
 });
 
 // ── Root ──────────────────────────────────────────────────────────────────────
@@ -2327,10 +2441,24 @@ app.use((req, res) => {
 });
 
 // ── Error handler ─────────────────────────────────────────────────────────────
+// Express v5: must be a 4-param middleware (err, req, res, next).
+// Logs stack to Vercel runtime logs for debugging AND surfaces the real message
+// in the JSON response so the frontend/admin can actually see what's wrong
+// instead of a generic "Internal server error" with no details.
 
 app.use((err, req, res, _next) => {
-  console.error('[server error]', err.message);
-  res.status(500).json({ success: false, message: 'Internal server error.' });
+  const stack = (err && err.stack) ? err.stack : String(err);
+  console.error('[server error]', stack);
+  if (!res.headersSent) {
+    return res.status(500).json({
+      success: false,
+      message: (err && err.message) ? err.message : 'Internal server error.',
+      // If in development or explicitly requested, include stack
+      ...((!process.env.NODE_ENV || process.env.NODE_ENV !== 'production')
+        ? { _stack: stack.split('\n').slice(0, 8).join('\n') }
+        : {})
+    });
+  }
 });
 
 // ── Start (local dev only — Vercel uses module.exports = app) ─────────────────
