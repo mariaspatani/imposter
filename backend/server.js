@@ -2398,11 +2398,21 @@ if (!process.env.VERCEL) {
   };
 
   Object.entries(PAGE_MAP).forEach(([route, file]) => {
-    app.get(route, (_req, res) => res.sendFile(path.join(FRONTEND_DIR, file)));
+    app.get(route, (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.sendFile(path.join(FRONTEND_DIR, file));
+    });
   });
 
   // Also serve raw .html filenames and any other static assets (CSS, JS, images)
-  app.use(express.static(FRONTEND_DIR));
+  // No-cache on HTML files so browsers always pick up the latest version.
+  app.use(express.static(FRONTEND_DIR, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    }
+  }));
 }
 
 // ── POST /api/admin/reset-event-data ─────────────────────────────────────────
