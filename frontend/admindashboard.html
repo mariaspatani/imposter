@@ -1347,19 +1347,31 @@ function timerStatusLabel(status){
 }
 
 function getTimerRemainingSeconds(t) {
-    const durSecs = t.duration_minutes ? t.duration_minutes * 60 : (t.duration_seconds || t.duration_secs || 900);
+    const durSecs = t.duration_seconds
+        ? Number(t.duration_seconds)
+        : (t.duration_minutes ? t.duration_minutes * 60 : 900);
+
     if (t.status === 'finished') return 0;
+
     if (t.status === 'running') {
+        // Prefer server-computed ends_at (most accurate)
         if (t.ends_at) {
-            return Math.max(0, Math.floor((new Date(t.ends_at).getTime() - Date.now()) / 1000));
+            const rem = Math.floor((new Date(t.ends_at).getTime() - Date.now()) / 1000);
+            // If ends_at is stale/past, fall back to remaining_seconds
+            if (rem > 0 && rem <= durSecs) return rem;
         }
-        if (t.started_at) {
-            const baseRem = (t.remaining_seconds != null && t.remaining_seconds > 0) ? Number(t.remaining_seconds) : durSecs;
-            const elapsed = Math.floor((Date.now() - new Date(t.started_at).getTime()) / 1000);
-            return Math.max(0, baseRem - elapsed);
+        // Fall back to remaining_seconds snapshot
+        if (t.remaining_seconds != null && Number(t.remaining_seconds) > 0) {
+            return Math.min(Number(t.remaining_seconds), durSecs);
         }
+        return durSecs;
     }
-    return t.remaining_seconds != null ? Number(t.remaining_seconds) : durSecs;
+
+    // idle / paused / any other status — return the stored remaining snapshot
+    if (t.remaining_seconds != null && Number(t.remaining_seconds) >= 0) {
+        return Math.min(Number(t.remaining_seconds), durSecs);
+    }
+    return durSecs;
 }
 
 function renderTimers(){
@@ -1375,7 +1387,7 @@ function renderTimers(){
         const key    = t.event_key || t.event_name;
         const enc    = key.replace(/[^a-zA-Z0-9]/g,'_');
         const sColor = timerStatusColor(t.status);
-        const durSecs = t.duration_minutes ? t.duration_minutes*60 : (t.duration_seconds||t.duration_secs||900);
+        const durSecs = t.duration_seconds ? Number(t.duration_seconds) : (t.duration_minutes ? t.duration_minutes*60 : 900);
         const displaySeconds = getTimerRemainingSeconds(t);
 
         return `<div class="bg-cardgray border border-bordergray rounded-2xl p-5 shadow-xl space-y-4" id="timer-card-${enc}">

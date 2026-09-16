@@ -628,19 +628,16 @@ async function runEvaluation(participantId, assignmentData, options = {}) {
 }
 
 // ── GET /api/fizzbuzz/toggle ──────────────────────────────────────────────────
-// Returns simple status: waiting | active | closed (ignores timer countdown)
+// Reads fizzbuzz_open from game_config — never reads event_timers.status
 app.get('/api/fizzbuzz/toggle', async (req, res) => {
   try {
     const { data } = await supabase
-      .from('event_timers')
-      .select('status')
-      .eq('event_key', 'fizzbuzz')
+      .from('game_config')
+      .select('config_json')
+      .eq('game_id', 'fizzbuzz')
       .maybeSingle();
-    if (!data) return res.json({ success: true, fizzbuzz_open: false, status: 'waiting' });
-    // Map internal statuses to the three public states
-    const statusMap = { active: 'active', running: 'active', closed: 'closed', idle: 'waiting', waiting: 'waiting', finished: 'closed', paused: 'waiting' };
-    const status    = statusMap[data.status] || 'waiting';
-    const open      = status === 'active';
+    const open   = !!(data && data.config_json && data.config_json.fizzbuzz_open);
+    const status = open ? 'active' : 'closed';
     return res.json({ success: true, fizzbuzz_open: open, status });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -2030,22 +2027,25 @@ app.post('/api/admin/fizzbuzz/score',    requireAdmin, applyFizzBuzzScore);
 app.post('/api/admin/fizzbuzz/score-v2', requireAdmin, applyFizzBuzzScore);
 
 // ── POST /api/admin/fizzbuzz/toggle ───────────────────────────────────────────
-// action: "on" → status = active   |   action: "off" → status = closed
+// Stores open/closed in game_config.config_json — never touches event_timers.status
+// so the countdown timer is never corrupted by the toggle.
 app.post('/api/admin/fizzbuzz/toggle', requireAdmin, async (req, res) => {
   try {
     const { action } = req.body;
     if (!action) return res.status(400).json({ success: false, message: 'action required: "on" or "off"' });
 
-    const newStatus = action === 'on' ? 'active' : 'closed';
-    const open      = action === 'on';
+    const open = action === 'on';
 
-    const { error } = await supabase.from('event_timers')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('event_key', 'fizzbuzz');
+    // Read current config, merge fizzbuzz_open flag, write back
+    const { data: cfg } = await supabase.from('game_config').select('config_json').eq('game_id', 'fizzbuzz').maybeSingle();
+    const currentJson = (cfg && cfg.config_json) ? cfg.config_json : {};
+    const { error } = await supabase.from('game_config')
+      .update({ config_json: { ...currentJson, fizzbuzz_open: open }, updated_at: new Date().toISOString() })
+      .eq('game_id', 'fizzbuzz');
     if (error) return res.status(500).json({ success: false, message: error.message });
 
     auditLog('fizzbuzz_toggle', 'fizzbuzz', { action });
-    return res.json({ success: true, fizzbuzz_open: open, status: newStatus });
+    return res.json({ success: true, fizzbuzz_open: open, status: open ? 'active' : 'closed' });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
